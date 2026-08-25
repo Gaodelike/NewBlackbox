@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.os.PersistableBundle;
 import android.util.Log;
 
@@ -23,6 +24,7 @@ import top.niunaijun.blackbox.fake.service.IActivityClientProxy;
 import top.niunaijun.blackbox.utils.HackAppUtils;
 import top.niunaijun.blackbox.utils.compat.ActivityCompat;
 import top.niunaijun.blackbox.utils.compat.ActivityManagerCompat;
+import top.niunaijun.blackbox.utils.compat.CameraCompat;
 import top.niunaijun.blackbox.utils.compat.ContextCompat;
 
 public final class AppInstrumentation extends BaseInstrumentationDelegate implements IInjectHook {
@@ -104,6 +106,7 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     private void checkActivity(Activity activity) {
         Log.d(TAG, "callActivityOnCreate: " + activity.getClass().getName());
         HackAppUtils.enableQQLogOutput(activity.getPackageName(), activity.getClassLoader());
+        HackAppUtils.fixWeWorkActivityStartup(activity.getPackageName(), activity.getClassLoader());
         checkHCallback();
         HookManager.get().checkEnv(IActivityClientProxy.class);
         ActivityInfo info = BRActivity.get(activity).mActivityInfo();
@@ -125,22 +128,56 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public void callActivityOnCreate(Activity activity, Bundle icicle, PersistableBundle persistentState) {
         checkActivity(activity);
+        CameraCompat.enterHostCameraPackage(activity);
         super.callActivityOnCreate(activity, icicle, persistentState);
     }
 
     @Override
     public void callActivityOnCreate(Activity activity, Bundle icicle) {
         checkActivity(activity);
+        CameraCompat.enterHostCameraPackage(activity);
         super.callActivityOnCreate(activity, icicle);
+    }
+
+    @Override
+    public void callActivityOnResume(Activity activity) {
+        if (CameraCompat.needsHostCameraPackage(activity)) {
+            CameraCompat.enterHostCameraPackage(activity);
+        }
+        super.callActivityOnResume(activity);
+    }
+
+    @Override
+    public void callActivityOnPause(Activity activity) {
+        super.callActivityOnPause(activity);
+    }
+
+    @Override
+    public void callActivityOnDestroy(Activity activity) {
+        super.callActivityOnDestroy(activity);
+        if (CameraCompat.needsHostCameraPackage(activity)) {
+            CameraCompat.restoreHostCameraPackage(activity);
+        }
     }
 
     @Override
     public void callApplicationOnCreate(Application app) {
         checkHCallback();
         super.callApplicationOnCreate(app);
+        HackAppUtils.fixWeWorkActivityStartup(app.getPackageName(), app.getClassLoader());
     }
 
+    @Override
+    public Activity newActivity(Class<?> clazz, Context context, IBinder token, Application application, Intent intent, ActivityInfo info, CharSequence title, Activity parent, String id, Object lastNonConfigurationInstance) throws IllegalAccessException, InstantiationException {
+        if (clazz != null) {
+            CameraCompat.enterHostCameraPackage(clazz.getName(), token);
+        }
+        return super.newActivity(clazz, context, token, application, intent, info, title, parent, id, lastNonConfigurationInstance);
+    }
+
+    @Override
     public Activity newActivity(ClassLoader cl, String className, Intent intent) throws InstantiationException, IllegalAccessException, ClassNotFoundException {
+        CameraCompat.enterHostCameraPackage(className);
         try {
             return super.newActivity(cl, className, intent);
         } catch (ClassNotFoundException e) {

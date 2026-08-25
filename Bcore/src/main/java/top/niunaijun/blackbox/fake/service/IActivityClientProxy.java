@@ -12,6 +12,7 @@ import top.niunaijun.blackbox.fake.hook.ClassInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
 import top.niunaijun.blackbox.fake.hook.ScanClass;
+import top.niunaijun.blackbox.utils.compat.CameraCompat;
 import top.niunaijun.blackbox.utils.compat.TaskDescriptionCompat;
 
 
@@ -81,6 +82,7 @@ public class IActivityClientProxy extends ClassInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             IBinder token = (IBinder) args[0];
+            CameraCompat.restoreHostCameraPackage(token);
             BActivityManager.get().onActivityDestroyed(token);
             return method.invoke(who, args);
         }

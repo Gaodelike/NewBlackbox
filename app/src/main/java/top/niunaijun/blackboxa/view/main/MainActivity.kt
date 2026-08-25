@@ -40,6 +40,7 @@ class MainActivity : LoadingActivity() {
         private const val TAG = "MainActivity"
         private const val STORAGE_PERMISSION_REQUEST_CODE = 1001
         private const val VPN_PERMISSION_REQUEST_CODE = 1002
+        private const val MEDIA_PERMISSION_REQUEST_CODE = 1003
 
         fun start(context: Context) {
             val intent = Intent(context, MainActivity::class.java)
@@ -65,6 +66,8 @@ class MainActivity : LoadingActivity() {
 
             
             checkStoragePermission()
+
+            checkMediaPermission()
 
             
             checkVpnPermission()
@@ -127,6 +130,40 @@ class MainActivity : LoadingActivity() {
         }
     }
 
+    private fun checkMediaPermission() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) {
+                return
+            }
+
+            val permissionsToRequest = mutableListOf<String>()
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                            this,
+                            android.Manifest.permission.CAMERA
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(android.Manifest.permission.CAMERA)
+            }
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                            this,
+                            android.Manifest.permission.RECORD_AUDIO
+                    ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(android.Manifest.permission.RECORD_AUDIO)
+            }
+
+            if (permissionsToRequest.isNotEmpty()) {
+                androidx.core.app.ActivityCompat.requestPermissions(
+                        this,
+                        permissionsToRequest.toTypedArray(),
+                        MEDIA_PERMISSION_REQUEST_CODE
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking media permission: ${e.message}")
+        }
+    }
+
     override fun onRequestPermissionsResult(
             requestCode: Int,
             permissions: Array<out String>,
@@ -142,6 +179,19 @@ class MainActivity : LoadingActivity() {
                 Log.d(TAG, "Storage permissions granted")
             } else {
                 Log.w(TAG, "Storage permissions denied")
+            }
+            return
+        }
+
+        if (requestCode == MEDIA_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() &&
+                            grantResults.all {
+                                it == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            }
+            ) {
+                Log.d(TAG, "Media permissions granted")
+            } else {
+                Log.w(TAG, "Media permissions denied")
             }
         }
     }

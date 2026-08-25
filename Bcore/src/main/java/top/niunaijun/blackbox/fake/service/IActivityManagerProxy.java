@@ -2,6 +2,7 @@ package top.niunaijun.blackbox.fake.service;
 
 import android.Manifest;
 import android.app.ActivityManager;
+import android.app.Application;
 import android.app.IServiceConnection;
 import android.content.ComponentName;
 import android.content.Context;
@@ -42,6 +43,7 @@ import top.niunaijun.blackbox.fake.frameworks.BPackageManager;
 import top.niunaijun.blackbox.fake.hook.ClassInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
+import top.niunaijun.blackbox.fake.hook.ProxyMethods;
 import top.niunaijun.blackbox.fake.hook.ScanClass;
 import top.niunaijun.blackbox.fake.service.base.PkgMethodProxy;
 import top.niunaijun.blackbox.fake.service.context.providers.ContentProviderStub;
@@ -578,7 +580,7 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             String resolvedType = (String) args[intentIndex + 1];
             Intent proxyIntent = BlackBoxCore.getBActivityManager().sendBroadcast(intent, resolvedType, BActivityThread.getUserId());
             if (proxyIntent != null) {
-                proxyIntent.setExtrasClassLoader(BActivityThread.getApplication().getClassLoader());
+                proxyIntent.setExtrasClassLoader(getBroadcastClassLoader());
                 ProxyBroadcastRecord.saveStub(proxyIntent, intent, BActivityThread.getUserId());
                 args[intentIndex] = proxyIntent;
             }
@@ -600,6 +602,14 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 }
             }
             return 1;
+        }
+
+        private ClassLoader getBroadcastClassLoader() {
+            Application application = BActivityThread.getApplication();
+            if (application != null && application.getClassLoader() != null) {
+                return application.getClassLoader();
+            }
+            return IActivityManagerProxy.class.getClassLoader();
         }
     }
 
@@ -800,10 +810,24 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         }
     }
 
+    @ProxyMethods({"checkPermissionForDevice", "checkPermissionWithToken"})
+    public static class CheckPermissionForDevice extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            MethodParameterUtils.replaceLastUid(args);
+            if (containsCapturePermission(args)) {
+                Slog.d(TAG, "ActivityManager " + method.getName() + ": Granting capture permission");
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
     
     private static boolean isAudioPermission(String permission) {
         if (permission == null) return false;
-        return permission.equals(Manifest.permission.RECORD_AUDIO)
+        return permission.equals(Manifest.permission.CAMERA)
+                || permission.equals(Manifest.permission.RECORD_AUDIO)
                 || permission.equals(Manifest.permission.CAPTURE_AUDIO_OUTPUT)
                 || permission.equals(Manifest.permission.MODIFY_AUDIO_SETTINGS)
                 || permission.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
@@ -816,6 +840,18 @@ public class IActivityManagerProxy extends ClassInvocationStub {
                 || permission.equals("android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED")
                 || permission.equals("android.permission.FOREGROUND_SERVICE_PHONE_CALL")
                 || permission.equals("android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE");
+    }
+
+    private static boolean containsCapturePermission(Object[] args) {
+        if (args == null) {
+            return false;
+        }
+        for (Object arg : args) {
+            if (arg instanceof String && isAudioPermission((String) arg)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @ProxyMethod("checkUriPermission")

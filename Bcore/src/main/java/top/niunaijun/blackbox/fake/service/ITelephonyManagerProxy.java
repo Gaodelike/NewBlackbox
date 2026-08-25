@@ -1,12 +1,13 @@
 package top.niunaijun.blackbox.fake.service;
 
 import android.content.Context;
+import android.os.Bundle;
 import android.os.IBinder;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.List;
 
 import black.android.os.BRServiceManager;
@@ -18,6 +19,7 @@ import top.niunaijun.blackbox.fake.frameworks.BLocationManager;
 import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
+import top.niunaijun.blackbox.utils.MethodParameterUtils;
 import top.niunaijun.blackbox.utils.Md5Utils;
 
 
@@ -42,6 +44,17 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
     @Override
     public boolean isBadEnv() {
         return false;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        MethodParameterUtils.replaceFirstAppPkg(args);
+        MethodParameterUtils.replaceLastUid(args);
+        if (BLocationManager.isFakeLocationEnable() && isCellOrLocationMethod(method.getName())) {
+            Log.d(TAG, "Blocking real telephony location method: " + method.getName());
+            return defaultValue(method.getReturnType());
+        }
+        return super.invoke(proxy, method, args);
     }
 
     @ProxyMethod("getDeviceId")
@@ -113,11 +126,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getCellLocation");
             if (BLocationManager.isFakeLocationEnable()) {
-                BCell cell = BLocationManager.get().getCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
-                if (cell != null) {
-                    
-                    return null;
-                }
+                return defaultValue(method.getReturnType());
             }
             return method.invoke(who, args);
         }
@@ -128,9 +137,7 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             if (BLocationManager.isFakeLocationEnable()) {
-                List<BCell> cell = BLocationManager.get().getAllCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
-                
-                return cell;
+                return Collections.emptyList();
             }
             try {
                 return method.invoke(who, args);
@@ -145,6 +152,42 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getNetworkOperator");
+            if (BLocationManager.isFakeLocationEnable()) {
+                return "46001";
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("getNetworkOperatorForPhone")
+    public static class GetNetworkOperatorForPhone extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BLocationManager.isFakeLocationEnable()) {
+                return "46001";
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("getNetworkCountryIso")
+    public static class GetNetworkCountryIso extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BLocationManager.isFakeLocationEnable()) {
+                return "cn";
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("getNetworkCountryIsoForPhone")
+    public static class GetNetworkCountryIsoForPhone extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (BLocationManager.isFakeLocationEnable()) {
+                return "cn";
+            }
             return method.invoke(who, args);
         }
     }
@@ -154,6 +197,9 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             try {
+                if (BLocationManager.isFakeLocationEnable()) {
+                    return TelephonyManager.NETWORK_TYPE_LTE;
+                }
                 return method.invoke(who, args);
             } catch (Throwable e) {
                 return 0;
@@ -167,11 +213,60 @@ public class ITelephonyManagerProxy extends BinderInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             Log.d(TAG, "getNeighboringCellInfo");
             if (BLocationManager.isFakeLocationEnable()) {
-                List<BCell> cell = BLocationManager.get().getNeighboringCell(BActivityThread.getUserId(), BActivityThread.getAppPackageName());
-                
-                return null;
+                return Collections.emptyList();
             }
             return method.invoke(who, args);
         }
+    }
+
+    private static boolean isCellOrLocationMethod(String methodName) {
+        if (methodName == null) {
+            return false;
+        }
+        return methodName.contains("Cell")
+                || methodName.contains("cell")
+                || methodName.contains("Neighboring")
+                || methodName.contains("Location")
+                || methodName.contains("location");
+    }
+
+    private static Object defaultValue(Class<?> type) {
+        if (type == void.class) {
+            return null;
+        }
+        if (List.class.isAssignableFrom(type)) {
+            return Collections.emptyList();
+        }
+        if (Bundle.class.isAssignableFrom(type)) {
+            return new Bundle();
+        }
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == byte.class) {
+            return (byte) 0;
+        }
+        if (type == short.class) {
+            return (short) 0;
+        }
+        if (type == int.class) {
+            return 0;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        if (type == char.class) {
+            return (char) 0;
+        }
+        return null;
     }
 }

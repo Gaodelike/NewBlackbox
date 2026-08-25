@@ -35,6 +35,7 @@ import top.niunaijun.blackbox.proxy.ProxyManifest;
 import top.niunaijun.blackbox.proxy.record.ProxyActivityRecord;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
+import top.niunaijun.blackbox.utils.compat.CameraCompat;
 
 
 
@@ -145,6 +146,8 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
         ProxyActivityRecord stubRecord = ProxyActivityRecord.create(intent);
         ActivityInfo activityInfo = stubRecord.mActivityInfo;
         if (activityInfo != null) {
+            CameraCompat.enterHostCameraPackage(activityInfo.name, token);
+
             if (BActivityThread.getAppConfig() == null) {
                 BlackBoxCore.getBActivityManager().restartProcess(activityInfo.packageName, activityInfo.processName, stubRecord.mUserId);
 

@@ -1,5 +1,6 @@
 package top.niunaijun.blackbox.core.system.location;
 
+import android.location.Location;
 import android.os.IBinder;
 import android.os.IInterface;
 import android.os.Parcel;
@@ -11,13 +12,15 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.lang.reflect.Method;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-import black.android.location.BRILocationListener;
 import black.android.location.BRILocationListenerStub;
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.env.BEnvironment;
@@ -37,7 +40,7 @@ public class BLocationManagerService extends IBLocationManagerService.Stub imple
     private static final BLocationManagerService sService = new BLocationManagerService();
     private final SparseArray<HashMap<String, BLocationConfig>> mLocationConfigs = new SparseArray<>();
     private final BLocationConfig mGlobalConfig = new BLocationConfig();
-    private final Map<IBinder, LocationRecord> mLocationListeners = new HashMap<>();
+    private final Map<IBinder, LocationRecord> mLocationListeners = new ConcurrentHashMap<>();
     private final Executor mThreadPool = Executors.newCachedThreadPool();
 
     public static BLocationManagerService get() {
@@ -208,26 +211,43 @@ public class BLocationManagerService extends IBLocationManagerService.Stub imple
         if (listener == null || !listener.pingBinder()) {
             return;
         }
-        if (mLocationListeners.containsKey(listener))
+        LocationRecord record = new LocationRecord(packageName, userId);
+        if (mLocationListeners.putIfAbsent(listener, record) != null) {
             return;
-        listener.linkToDeath(new DeathRecipient() {
+        }
+        record.deathRecipient = new DeathRecipient() {
             @Override
             public void binderDied() {
-                listener.unlinkToDeath(this, 0);
-                mLocationListeners.remove(listener);
+                mLocationListeners.remove(listener, record);
             }
-        }, 0);
-        LocationRecord record = new LocationRecord(packageName, userId);
-        mLocationListeners.put(listener, record);
+        };
+        try {
+            listener.linkToDeath(record.deathRecipient, 0);
+        } catch (RemoteException e) {
+            mLocationListeners.remove(listener, record);
+            throw e;
+        }
+        Slog.d(TAG, "Registered location listener for " + packageName + ", userId=" + userId);
         addTask(listener);
     }
 
     @Override
     public void removeUpdates(IBinder listener) throws RemoteException {
-        if (listener == null || !listener.pingBinder()) {
+        if (listener == null) {
             return;
         }
-        mLocationListeners.remove(listener);
+        LocationRecord record = mLocationListeners.remove(listener);
+        if (record != null && record.deathRecipient != null && listener.isBinderAlive()) {
+            try {
+                listener.unlinkToDeath(record.deathRecipient, 0);
+            } catch (RuntimeException e) {
+                Slog.w(TAG, "Unable to unlink location listener death recipient", e);
+            }
+        }
+        if (record != null) {
+            Slog.d(TAG, "Unregistered location listener for " + record.packageName
+                    + ", userId=" + record.userId);
+        }
     }
 
     private void addTask(IBinder locationListener) {
@@ -237,23 +257,126 @@ public class BLocationManagerService extends IBLocationManagerService.Stub imple
             while (locationListener.pingBinder()) {
                 IInterface iInterface = BRILocationListenerStub.get().asInterface(locationListener);
                 LocationRecord locationRecord = mLocationListeners.get(locationListener);
-                if (locationRecord == null)
-                    continue;
+                if (locationRecord == null || iInterface == null) {
+                    break;
+                }
                 BLocation location = getLocation(locationRecord.userId, locationRecord.packageName);
-                if (location == null)
+                if (location == null) {
+                    if (!sleepForNextDispatch()) {
+                        break;
+                    }
                     continue;
+                }
                 if (location.equals(lastLocation) && (System.currentTimeMillis() - l) < 3000) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException ignored) {
+                    if (!sleepForNextDispatch()) {
+                        break;
                     }
                     continue;
                 }
                 lastLocation = location;
                 l = System.currentTimeMillis();
-                BlackBoxCore.get().getHandler().post(() -> BRILocationListener.get(iInterface).onLocationChanged(location.convert2SystemLocation()));
+                Location systemLocation = location.convert2SystemLocation();
+                BlackBoxCore.get().getHandler().post(() -> dispatchLocationChanged(iInterface, systemLocation));
             }
         });
+    }
+
+    private boolean sleepForNextDispatch() {
+        try {
+            Thread.sleep(1000);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    private void dispatchLocationChanged(IInterface listener, Location location) {
+        if (listener == null || location == null) {
+            return;
+        }
+        try {
+            if (invokeLocationChanged(listener, location, true)) {
+                return;
+            }
+            invokeLocationChanged(listener, location, false);
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to dispatch fake location: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean invokeLocationChanged(IInterface listener, Location location, boolean preferListSignature) throws Exception {
+        Method fallback = null;
+        for (Method method : listener.getClass().getMethods()) {
+            if (!"onLocationChanged".equals(method.getName())) {
+                continue;
+            }
+            Class<?>[] parameterTypes = method.getParameterTypes();
+            if (parameterTypes.length == 1 && Location.class.isAssignableFrom(parameterTypes[0])) {
+                if (!preferListSignature) {
+                    method.invoke(listener, location);
+                    return true;
+                }
+                fallback = method;
+            } else if (parameterTypes.length >= 1 && List.class.isAssignableFrom(parameterTypes[0])) {
+                if (preferListSignature) {
+                    Object[] args = buildLocationListArgs(parameterTypes, location);
+                    method.invoke(listener, args);
+                    return true;
+                }
+                fallback = method;
+            }
+        }
+        if (fallback != null) {
+            Class<?>[] parameterTypes = fallback.getParameterTypes();
+            if (parameterTypes.length == 1) {
+                fallback.invoke(listener, location);
+            } else {
+                fallback.invoke(listener, buildLocationListArgs(parameterTypes, location));
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private Object[] buildLocationListArgs(Class<?>[] parameterTypes, Location location) {
+        Object[] args = new Object[parameterTypes.length];
+        args[0] = Collections.singletonList(location);
+        for (int i = 1; i < parameterTypes.length; i++) {
+            args[i] = defaultValue(parameterTypes[i]);
+        }
+        return args;
+    }
+
+    private Object defaultValue(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return null;
+        }
+        if (type == boolean.class) {
+            return false;
+        }
+        if (type == byte.class) {
+            return (byte) 0;
+        }
+        if (type == short.class) {
+            return (short) 0;
+        }
+        if (type == int.class) {
+            return 0;
+        }
+        if (type == long.class) {
+            return 0L;
+        }
+        if (type == float.class) {
+            return 0f;
+        }
+        if (type == double.class) {
+            return 0d;
+        }
+        if (type == char.class) {
+            return (char) 0;
+        }
+        return null;
     }
 
     public void save() {

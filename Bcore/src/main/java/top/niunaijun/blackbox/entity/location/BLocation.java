@@ -7,6 +7,8 @@ import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
 
+import java.util.Objects;
+
 
 public class BLocation implements Parcelable {
 
@@ -56,9 +58,9 @@ public class BLocation implements Parcelable {
         this.mLatitude = in.readDouble();
         this.mLongitude = in.readDouble();
         this.mAltitude = in.readDouble();
-        this.mAccuracy = in.readFloat();
         this.mSpeed = in.readFloat();
         this.mBearing = in.readFloat();
+        this.mAccuracy = in.readFloat();
     }
 
     public boolean isEmpty() {
@@ -89,19 +91,57 @@ public class BLocation implements Parcelable {
                 '}';
     }
 
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof BLocation)) {
+            return false;
+        }
+        BLocation other = (BLocation) obj;
+        return Double.compare(mLatitude, other.mLatitude) == 0
+                && Double.compare(mLongitude, other.mLongitude) == 0
+                && Double.compare(mAltitude, other.mAltitude) == 0
+                && Float.compare(mSpeed, other.mSpeed) == 0
+                && Float.compare(mBearing, other.mBearing) == 0
+                && Float.compare(mAccuracy, other.mAccuracy) == 0;
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(mLatitude, mLongitude, mAltitude, mSpeed, mBearing, mAccuracy);
+    }
+
     public Location convert2SystemLocation() {
-        Location location = new Location(LocationManager.GPS_PROVIDER);
+        return convert2SystemLocation(LocationManager.GPS_PROVIDER);
+    }
+
+    public Location convert2SystemLocation(String provider) {
+        if (provider == null || provider.length() == 0) {
+            provider = LocationManager.GPS_PROVIDER;
+        }
+        Location location = new Location(provider);
         location.setLatitude(mLatitude);
         location.setLongitude(mLongitude);
+        location.setAltitude(mAltitude);
         location.setSpeed(mSpeed);
         location.setBearing(mBearing);
-        location.setAccuracy(40f);
+        location.setAccuracy(mAccuracy > 0 ? mAccuracy : 40f);
         location.setTime(System.currentTimeMillis());
+        location.setElapsedRealtimeNanos(android.os.SystemClock.elapsedRealtimeNanos());
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            location.setVerticalAccuracyMeters(40f);
+            location.setSpeedAccuracyMetersPerSecond(0.1f);
+            location.setBearingAccuracyDegrees(1f);
+        }
         Bundle extraBundle = new Bundle();
         
         int satelliteCount = 10;
         extraBundle.putInt("satellites", satelliteCount);
         extraBundle.putInt("satellitesvalue", satelliteCount);
+        extraBundle.putBoolean("is_mock", false);
+        extraBundle.putString("networkLocationType", "wifi");
         location.setExtras(extraBundle);
         return location;
     }

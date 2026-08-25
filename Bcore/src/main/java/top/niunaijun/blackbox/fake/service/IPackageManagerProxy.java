@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.util.Log;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.ArrayList;
@@ -72,6 +73,29 @@ public class IPackageManagerProxy extends BinderInvocationStub {
     @Override
     public boolean isBadEnv() {
         return false;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        boolean trace = shouldTracePackageCall(method, args);
+        if (trace) {
+            Slog.d(TAG, "PackageManager call: " + method.getName()
+                    + " args=" + briefArgs(args));
+        }
+        try {
+            Object result = super.invoke(proxy, method, args);
+            if (trace) {
+                Slog.d(TAG, "PackageManager result: " + method.getName()
+                        + " -> " + briefValue(result));
+            }
+            return result;
+        } catch (Throwable e) {
+            if (trace) {
+                Slog.w(TAG, "PackageManager failed: " + method.getName()
+                        + " -> " + e.getClass().getName() + ": " + e.getMessage());
+            }
+            throw e;
+        }
     }
 
     @Override
@@ -144,8 +168,10 @@ public class IPackageManagerProxy extends BinderInvocationStub {
                 if (packageInfo.requestedPermissions != null && packageInfo.requestedPermissionsFlags != null) {
                     for (int i = 0; i < packageInfo.requestedPermissions.length; i++) {
                         String perm = packageInfo.requestedPermissions[i];
-                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
+                        if (perm != null && (perm.equals(android.Manifest.permission.CAMERA)
+                                || perm.equals(android.Manifest.permission.RECORD_AUDIO)
                                 || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
+                                || perm.equals("android.permission.FOREGROUND_SERVICE_CAMERA")
                                 || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
                                 || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT))) {
                             packageInfo.requestedPermissionsFlags[i] |= PackageInfo.REQUESTED_PERMISSION_GRANTED;
@@ -182,8 +208,19 @@ public class IPackageManagerProxy extends BinderInvocationStub {
     public static class GetPackageUid extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String originalPackageName = getFirstString(args);
+            String currentPackageName = currentAppPackage();
+            if (currentPackageName != null && currentPackageName.equals(originalPackageName)) {
+                Slog.d(TAG, "getPackageUid: returning host uid for current virtual package "
+                        + originalPackageName + " -> " + BlackBoxCore.getHostUid());
+                return BlackBoxCore.getHostUid();
+            }
             MethodParameterUtils.replaceFirstAppPkg(args);
-            return method.invoke(who, args);
+            Object result = method.invoke(who, args);
+            Slog.d(TAG, "getPackageUid: " + originalPackageName
+                    + " argsAfterReplace=" + briefArgs(args)
+                    + " result=" + briefValue(result));
+            return result;
         }
     }
 
@@ -349,17 +386,61 @@ public class IPackageManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("hasSystemFeature")
+    public static class HasSystemFeature extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String featureName = getFirstString(args);
+            if (isCameraFeature(featureName)) {
+                Slog.d(TAG, "hasSystemFeature: forcing camera feature true: " + featureName);
+                return true;
+            }
+            Object result = method.invoke(who, args);
+            Slog.d(TAG, "hasSystemFeature: " + featureName + " -> " + result);
+            return result;
+        }
+    }
+
+    @ProxyMethod("getNameForUid")
+    public static class GetNameForUid extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            int uid = getFirstInt(args, -1);
+            if (isCurrentVirtualUid(uid)) {
+                String currentPackageName = currentAppPackage();
+                if (currentPackageName != null) {
+                    Slog.d(TAG, "getNameForUid: uid=" + uid
+                            + " -> " + currentPackageName);
+                    return currentPackageName;
+                }
+            }
+            Object result = method.invoke(who, args);
+            Slog.d(TAG, "getNameForUid: uid=" + uid + " -> " + briefValue(result));
+            return result;
+        }
+    }
+
     @ProxyMethod("getPackagesForUid")
     public static class GetPackagesForUid extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            int uid = (Integer) args[0];
+            int originalUid = (Integer) args[0];
+            int uid = originalUid;
             if (uid == BlackBoxCore.getHostUid()) {
                 args[0] = BActivityThread.getBUid();
                 uid = (int) args[0];
             }
             String[] packagesForUid = BlackBoxCore.getBPackageManager().getPackagesForUid(uid);
-            Slog.d(TAG, args[0] + " , " + BActivityThread.getAppProcessName() + " GetPackagesForUid: " + Arrays.toString(packagesForUid));
+            if ((packagesForUid == null || packagesForUid.length == 0)
+                    && isCurrentVirtualUid(originalUid)) {
+                String currentPackageName = currentAppPackage();
+                if (currentPackageName != null) {
+                    packagesForUid = new String[]{currentPackageName};
+                }
+            }
+            Slog.d(TAG, originalUid + " -> " + args[0] + " , "
+                    + BActivityThread.getAppProcessName()
+                    + " GetPackagesForUid: " + Arrays.toString(packagesForUid));
             return packagesForUid;
         }
     }
@@ -556,7 +637,8 @@ public class IPackageManagerProxy extends BinderInvocationStub {
     
     private static boolean isAudioPermission(String permission) {
         if (permission == null) return false;
-        return permission.equals(android.Manifest.permission.RECORD_AUDIO)
+        return permission.equals(android.Manifest.permission.CAMERA)
+                || permission.equals(android.Manifest.permission.RECORD_AUDIO)
                 || permission.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT)
                 || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
                 || permission.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
@@ -593,6 +675,160 @@ public class IPackageManagerProxy extends BinderInvocationStub {
         }
         
         return false;
+    }
+
+    private static boolean shouldTracePackageCall(Method method, Object[] args) {
+        if (method == null) {
+            return false;
+        }
+        String name = method.getName();
+        if ("hasSystemFeature".equals(name)
+                || "getSystemAvailableFeatures".equals(name)
+                || "getNameForUid".equals(name)
+                || "getPackagesForUid".equals(name)
+                || "getPackageUid".equals(name)
+                || "checkPermission".equals(name)
+                || "checkSelfPermission".equals(name)
+                || "getPermissionFlags".equals(name)
+                || "getPackageInfo".equals(name)
+                || "getApplicationInfo".equals(name)) {
+            return true;
+        }
+        return containsTraceMarker(args);
+    }
+
+    private static boolean containsTraceMarker(Object[] args) {
+        if (args == null) {
+            return false;
+        }
+        for (Object arg : args) {
+            if (containsTraceMarker(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean containsTraceMarker(Object arg) {
+        if (arg == null) {
+            return false;
+        }
+        if (arg instanceof String) {
+            String value = ((String) arg).toLowerCase();
+            return value.contains("camera")
+                    || value.contains("com.tencent.wework")
+                    || value.contains("top.niunaijun.blackbox");
+        }
+        if (arg instanceof Object[]) {
+            for (Object item : (Object[]) arg) {
+                if (containsTraceMarker(item)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean isCameraFeature(String featureName) {
+        if (featureName == null) {
+            return false;
+        }
+        return featureName.toLowerCase().contains("camera");
+    }
+
+    private static boolean isCurrentVirtualUid(int uid) {
+        return uid > 0 && (uid == BlackBoxCore.getHostUid()
+                || uid == BActivityThread.getBUid()
+                || uid == BActivityThread.getCallingBUid()
+                || uid == BlackBoxCore.getBUid()
+                || uid == BlackBoxCore.getCallingBUid());
+    }
+
+    private static String currentAppPackage() {
+        String packageName = BActivityThread.getAppPackageName();
+        if (packageName == null || packageName.length() == 0) {
+            packageName = BlackBoxCore.getAppPackageName();
+        }
+        if (packageName == null || packageName.length() == 0) {
+            return null;
+        }
+        return packageName;
+    }
+
+    private static String getFirstString(Object[] args) {
+        if (args == null) {
+            return null;
+        }
+        for (Object arg : args) {
+            if (arg instanceof String) {
+                return (String) arg;
+            }
+        }
+        return null;
+    }
+
+    private static int getFirstInt(Object[] args, int defaultValue) {
+        if (args == null) {
+            return defaultValue;
+        }
+        for (Object arg : args) {
+            if (arg instanceof Integer) {
+                return (Integer) arg;
+            }
+        }
+        return defaultValue;
+    }
+
+    private static String briefArgs(Object[] args) {
+        if (args == null) {
+            return "null";
+        }
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < args.length; i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(briefValue(args[i]));
+        }
+        builder.append("]");
+        return truncate(builder.toString());
+    }
+
+    private static String briefValue(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        Class<?> valueClass = value.getClass();
+        if (valueClass.isArray()) {
+            return truncate(arrayToString(value));
+        }
+        return truncate(String.valueOf(value));
+    }
+
+    private static String arrayToString(Object array) {
+        if (array instanceof Object[]) {
+            return Arrays.deepToString((Object[]) array);
+        }
+        int length = Array.getLength(array);
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < length; i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(Array.get(array, i));
+        }
+        builder.append("]");
+        return builder.toString();
+    }
+
+    private static String truncate(String text) {
+        if (text == null) {
+            return "null";
+        }
+        if (text.length() > 240) {
+            return text.substring(0, 240) + "...";
+        }
+        return text;
     }
 
     @ProxyMethod("setSplashScreenTheme")

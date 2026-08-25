@@ -20,6 +20,7 @@ import top.niunaijun.blackbox.utils.ComponentUtils;
 import top.niunaijun.blackbox.utils.MethodParameterUtils;
 import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
+import top.niunaijun.blackbox.utils.compat.CameraCompat;
 import top.niunaijun.blackbox.utils.compat.StartActivityCompat;
 
 import static android.content.pm.PackageManager.GET_META_DATA;
@@ -35,6 +36,8 @@ public class ActivityManagerCommonProxy {
             MethodParameterUtils.replaceFirstAppPkg(args);
             Intent intent = getIntent(args);
             Slog.d(TAG, "Hook in : " + intent);
+            logIntentExtrasIfNeeded(intent);
+            normalizeIntentExtrasIfNeeded(intent);
             assert intent != null;
             
             
@@ -127,6 +130,74 @@ public class ActivityManagerCommonProxy {
             }
             return null;
         }
+
+        private void logIntentExtrasIfNeeded(Intent intent) {
+            if (intent == null) {
+                return;
+            }
+            ComponentName component = intent.getComponent();
+            String target = component == null ? "" : component.flattenToShortString();
+            if (!target.contains("LoginScannerActivity")
+                    && !"com.tencent.wework".equals(intent.getPackage())) {
+                return;
+            }
+            Bundle extras = intent.getExtras();
+            if (extras == null) {
+                Slog.d(TAG, "Intent extras for " + target + ": <none>");
+                return;
+            }
+            extras.setClassLoader(getClass().getClassLoader());
+            for (String key : extras.keySet()) {
+                try {
+                    Object value = extras.get(key);
+                    String type = value == null ? "null" : value.getClass().getName();
+                    Slog.d(TAG, "Intent extra for " + target + ": "
+                            + key + " type=" + type + " value=" + briefValue(value));
+                } catch (Throwable e) {
+                    Slog.w(TAG, "Failed to read intent extra for " + target
+                            + ": " + key + " error=" + e.getClass().getName()
+                            + ": " + e.getMessage());
+                }
+            }
+        }
+
+        private void normalizeIntentExtrasIfNeeded(Intent intent) {
+            if (intent == null) {
+                return;
+            }
+            ComponentName component = intent.getComponent();
+            String target = component == null ? "" : component.flattenToShortString();
+            if (!target.contains("com.tencent.wework/.login.controller.LoginScannerActivity")) {
+                return;
+            }
+            Bundle extras = intent.getExtras();
+            if (extras == null || !extras.containsKey("activity_request_code")) {
+                return;
+            }
+            try {
+                Object value = extras.get("activity_request_code");
+                if (!(value instanceof Boolean)) {
+                    intent.removeExtra("activity_request_code");
+                    Slog.d(TAG, "Removed incompatible activity_request_code extra for "
+                            + target + ": " + value);
+                }
+            } catch (Throwable e) {
+                intent.removeExtra("activity_request_code");
+                Slog.w(TAG, "Removed unreadable activity_request_code extra for "
+                        + target + ": " + e.getMessage());
+            }
+        }
+
+        private String briefValue(Object value) {
+            if (value instanceof Intent) {
+                return String.valueOf(value);
+            }
+            String text = String.valueOf(value);
+            if (text.length() > 180) {
+                return text.substring(0, 180) + "...";
+            }
+            return text;
+        }
     }
 
     @ProxyMethod("startActivities")
@@ -179,7 +250,9 @@ public class ActivityManagerCommonProxy {
     public static class ActivityDestroyed extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            BlackBoxCore.getBActivityManager().onActivityDestroyed((IBinder) args[0]);
+            IBinder token = (IBinder) args[0];
+            CameraCompat.restoreHostCameraPackage(token);
+            BlackBoxCore.getBActivityManager().onActivityDestroyed(token);
             return method.invoke(who, args);
         }
     }

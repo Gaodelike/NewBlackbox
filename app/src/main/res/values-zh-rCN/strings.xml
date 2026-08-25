@@ -14,6 +14,7 @@
     <string name="permission_setting">权限设置</string>
     <string name="fake_location">虚拟定位(预览版)</string>
     <string name="real_location">真实位置</string>
+    <string name="selected_location_format">已选位置：%1$s，%2$s</string>
     <string name="set_location">虚拟定位设置成功:%s-%s</string>
     <string name="close_fake_location">关闭虚拟定位</string>
     <string name="close_app_fake_location">是否关闭 %s 的虚拟定位</string>

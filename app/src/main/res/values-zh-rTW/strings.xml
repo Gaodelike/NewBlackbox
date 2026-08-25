@@ -11,6 +11,7 @@
     <string name="tg_group">電報組</string>
     <string name="fake_location">虛擬定位（預覽）</string>
     <string name="real_location">真實位置</string>
+    <string name="selected_location_format">已選位置：%1$s，%2$s</string>
     <string name="set_location">成功設定虛擬定位：%s-%s</string>
     <string name="close_fake_location">禁用虛擬位置</string>
     <string name="close_app_fake_location">是否關閉%s的虛擬定位</string>

@@ -48,6 +48,19 @@ android {
         options.compilerArgs << "-Xlint:-deprecation" << "-Xlint:-unchecked" << "-Xlint:-rawtypes"
         options.fork = true
         options.forkOptions.jvmArgs << "-Xmx2048m"
+        doFirst {
+            fileTree("$buildDir/generated/aidl_source_output_dir").matching {
+                include "**/*.java"
+            }.each { generatedFile ->
+                def source = generatedFile.getText("UTF-8")
+                def sanitized = source.readLines().collect { line ->
+                    line.startsWith(" * Using: ") ? " * Using: aidl" : line
+                }.join(System.lineSeparator())
+                if (source != sanitized) {
+                    generatedFile.write(sanitized, "UTF-8")
+                }
+            }
+        }
     }
     testOptions {
         unitTests.returnDefaultValues = true
