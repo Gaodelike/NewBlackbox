@@ -12,9 +12,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import black.android.location.BRLocationManager;
 import black.android.location.BRILocationManagerStub;
 import black.android.location.provider.BRProviderProperties;
 import black.android.os.BRServiceManager;
+import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.BActivityThread;
 import top.niunaijun.blackbox.entity.location.BLocation;
 import top.niunaijun.blackbox.fake.frameworks.BLocationManager;
@@ -22,11 +24,13 @@ import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
 import top.niunaijun.blackbox.utils.MethodParameterUtils;
+import top.niunaijun.blackbox.utils.compat.WeWorkLocationCompat;
 
 
 public class ILocationManagerProxy extends BinderInvocationStub {
     public static final String TAG = "ILocationManagerProxy";
     private static final String FUSED_PROVIDER = "fused";
+    private static volatile IInterface sProxyService;
     private static final List<String> FAKE_PROVIDERS = Arrays.asList(
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER,
@@ -45,12 +49,45 @@ public class ILocationManagerProxy extends BinderInvocationStub {
 
     @Override
     protected void inject(Object baseInvocation, Object proxyInvocation) {
+        sProxyService = (IInterface) proxyInvocation;
         replaceSystemService(Context.LOCATION_SERVICE);
+        ensureInjected(BlackBoxCore.getContext());
     }
 
     @Override
     public boolean isBadEnv() {
-        return BRServiceManager.get().getService(Context.LOCATION_SERVICE) != this;
+        if (BRServiceManager.get().getService(Context.LOCATION_SERVICE) != this) {
+            return true;
+        }
+        try {
+            Object locationManager = BlackBoxCore.getContext()
+                    .getSystemService(Context.LOCATION_SERVICE);
+            return locationManager != null
+                    && BRLocationManager.get(locationManager)._check_mService() != null
+                    && BRLocationManager.get(locationManager).mService() != sProxyService;
+        } catch (Throwable e) {
+            return true;
+        }
+    }
+
+    public static void ensureInjected(Context context) {
+        IInterface proxyService = sProxyService;
+        if (context == null || proxyService == null) {
+            return;
+        }
+        try {
+            Object locationManager = context.getSystemService(Context.LOCATION_SERVICE);
+            if (locationManager == null
+                    || BRLocationManager.get(locationManager)._check_mService() == null) {
+                return;
+            }
+            if (BRLocationManager.get(locationManager).mService() != proxyService) {
+                BRLocationManager.get(locationManager)._set_mService(proxyService);
+                Log.d(TAG, "Injected LocationManager for virtual context");
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "Unable to inject virtual LocationManager: " + e.getMessage());
+        }
     }
 
     @Override
@@ -198,6 +235,7 @@ public class ILocationManagerProxy extends BinderInvocationStub {
                 IInterface listener = findIInterface(args, "ILocationListener");
                 if (listener != null) {
                     Log.d(TAG, "requestLocationUpdates hooked for " + BActivityThread.getAppPackageName());
+                    WeWorkLocationCompat.ensure(BActivityThread.getApplication());
                     BLocationManager.get().requestLocationUpdates(listener.asBinder());
                     dispatchLocationCallback(listener, fakeLocation);
                     return defaultReturn(method);
@@ -227,6 +265,7 @@ public class ILocationManagerProxy extends BinderInvocationStub {
                 IInterface listener = findIInterface(args, "ILocationListener");
                 if (listener != null) {
                     Log.d(TAG, "registerLocationListener hooked for " + BActivityThread.getAppPackageName());
+                    WeWorkLocationCompat.ensure(BActivityThread.getApplication());
                     BLocationManager.get().requestLocationUpdates(listener.asBinder());
                     dispatchLocationCallback(listener, fakeLocation);
                     return defaultReturn(method);

@@ -22,11 +22,13 @@ import top.niunaijun.blackbox.fake.hook.IInjectHook;
 import top.niunaijun.blackbox.fake.service.HCallbackProxy;
 import top.niunaijun.blackbox.fake.service.IActivityClientProxy;
 import top.niunaijun.blackbox.fake.service.IInputMethodManagerProxy;
+import top.niunaijun.blackbox.fake.service.ILocationManagerProxy;
 import top.niunaijun.blackbox.utils.HackAppUtils;
 import top.niunaijun.blackbox.utils.compat.ActivityCompat;
 import top.niunaijun.blackbox.utils.compat.ActivityManagerCompat;
 import top.niunaijun.blackbox.utils.compat.CameraCompat;
 import top.niunaijun.blackbox.utils.compat.ContextCompat;
+import top.niunaijun.blackbox.utils.compat.WeWorkLocationCompat;
 
 public final class AppInstrumentation extends BaseInstrumentationDelegate implements IInjectHook {
 
@@ -113,6 +115,8 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
         ActivityInfo info = BRActivity.get(activity).mActivityInfo();
         ContextCompat.fix(activity);
         IInputMethodManagerProxy.ensureInjected(activity);
+        ILocationManagerProxy.ensureInjected(activity);
+        WeWorkLocationCompat.ensure(activity);
         ActivityCompat.fix(activity);
         if (info.theme != 0) {
             activity.getTheme().applyStyle(info.theme, true);
@@ -123,6 +127,8 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public Application newApplication(ClassLoader cl, String className, Context context) throws InstantiationException, IllegalAccessException, ClassNotFoundException {
         ContextCompat.fix(context);
+        ILocationManagerProxy.ensureInjected(context);
+        WeWorkLocationCompat.ensure(context);
 
         return super.newApplication(cl, className, context);
     }
@@ -144,6 +150,8 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public void callActivityOnResume(Activity activity) {
         IInputMethodManagerProxy.ensureInjected(activity);
+        ILocationManagerProxy.ensureInjected(activity);
+        WeWorkLocationCompat.ensure(activity);
         if (CameraCompat.needsHostCameraPackage(activity)) {
             CameraCompat.enterHostCameraPackage(activity);
         }
@@ -166,8 +174,10 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
     @Override
     public void callApplicationOnCreate(Application app) {
         checkHCallback();
+        ILocationManagerProxy.ensureInjected(app);
         super.callApplicationOnCreate(app);
         HackAppUtils.fixWeWorkActivityStartup(app.getPackageName(), app.getClassLoader());
+        WeWorkLocationCompat.ensure(app);
     }
 
     @Override
