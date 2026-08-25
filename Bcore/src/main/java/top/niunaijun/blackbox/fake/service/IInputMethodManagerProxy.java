@@ -7,20 +7,18 @@ import android.view.inputmethod.EditorInfo;
 
 import java.lang.reflect.Method;
 
-import black.com.android.internal.view.inputmethod.BRInputMethodManager;
 import black.android.os.BRServiceManager;
+import black.android.view.inputmethod.BRIInputMethodManagerGlobalInvoker;
+import black.com.android.internal.view.inputmethod.BRInputMethodManager;
 import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
-import top.niunaijun.blackbox.fake.hook.MethodHook;
-import top.niunaijun.blackbox.fake.hook.ProxyMethod;
-import top.niunaijun.blackbox.fake.hook.ScanClass;
 import top.niunaijun.blackbox.utils.MethodParameterUtils;
 import top.niunaijun.blackbox.utils.Slog;
 
 
-@ScanClass(IInputMethodManagerProxy.class)
 public class IInputMethodManagerProxy extends BinderInvocationStub {
     public static final String TAG = "IInputMethodManagerProxy";
+    private static volatile IInterface sProxyService;
 
     public IInputMethodManagerProxy() {
         super(BRServiceManager.get().getService(Context.INPUT_METHOD_SERVICE));
@@ -41,19 +39,57 @@ public class IInputMethodManagerProxy extends BinderInvocationStub {
 
     @Override
     protected void inject(Object baseInvocation, Object proxyInvocation) {
-        try {
-            Object inputMethodManager = BlackBoxCore.getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (inputMethodManager != null && BRInputMethodManager.get(inputMethodManager)._check_mService() != null) {
-                BRInputMethodManager.get(inputMethodManager)._set_mService((IInterface) proxyInvocation);
-            }
-        } catch (Throwable ignored) {
-        }
+        sProxyService = (IInterface) proxyInvocation;
+        ensureGlobalInvokerInjected(sProxyService);
+        ensureInjected(BlackBoxCore.getContext());
         replaceSystemService(Context.INPUT_METHOD_SERVICE);
     }
 
     @Override
     public boolean isBadEnv() {
-        return false;
+        try {
+            Object inputMethodManager = BlackBoxCore.getContext()
+                    .getSystemService(Context.INPUT_METHOD_SERVICE);
+            return inputMethodManager != null
+                    && BRInputMethodManager.get(inputMethodManager).mService() != sProxyService;
+        } catch (Throwable e) {
+            return true;
+        }
+    }
+
+    public static void ensureInjected(Context context) {
+        IInterface proxyService = sProxyService;
+        if (context == null || proxyService == null) {
+            return;
+        }
+        ensureGlobalInvokerInjected(proxyService);
+        try {
+            Object inputMethodManager = context.getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (inputMethodManager == null
+                    || BRInputMethodManager.get(inputMethodManager)._check_mService() == null) {
+                return;
+            }
+            if (BRInputMethodManager.get(inputMethodManager).mService() != proxyService) {
+                BRInputMethodManager.get(inputMethodManager)._set_mService(proxyService);
+                Slog.d(TAG, "Injected InputMethodManager for virtual activity context");
+            }
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to inject activity InputMethodManager: " + e.getMessage());
+        }
+    }
+
+    private static void ensureGlobalInvokerInjected(IInterface proxyService) {
+        try {
+            if (BRIInputMethodManagerGlobalInvoker.get()._check_sServiceCache() == null) {
+                return;
+            }
+            if (BRIInputMethodManagerGlobalInvoker.get().sServiceCache() != proxyService) {
+                BRIInputMethodManagerGlobalInvoker.get()._set_sServiceCache(proxyService);
+                Slog.d(TAG, "Injected IInputMethodManagerGlobalInvoker service cache");
+            }
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to inject global input method service: " + e.getMessage());
+        }
     }
 
     @Override
@@ -68,15 +104,6 @@ public class IInputMethodManagerProxy extends BinderInvocationStub {
                 return defaultValue(method.getReturnType());
             }
             throw e;
-        }
-    }
-
-    @ProxyMethod("startInputOrWindowGainedFocus")
-    public static class StartInputOrWindowGainedFocus extends MethodHook {
-        @Override
-        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            fixInputMethodArgs(args);
-            return method.invoke(who, args);
         }
     }
 

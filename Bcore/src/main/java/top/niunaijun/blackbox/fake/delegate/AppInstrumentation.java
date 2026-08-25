@@ -21,6 +21,7 @@ import top.niunaijun.blackbox.fake.hook.HookManager;
 import top.niunaijun.blackbox.fake.hook.IInjectHook;
 import top.niunaijun.blackbox.fake.service.HCallbackProxy;
 import top.niunaijun.blackbox.fake.service.IActivityClientProxy;
+import top.niunaijun.blackbox.fake.service.IInputMethodManagerProxy;
 import top.niunaijun.blackbox.utils.HackAppUtils;
 import top.niunaijun.blackbox.utils.compat.ActivityCompat;
 import top.niunaijun.blackbox.utils.compat.ActivityManagerCompat;
@@ -111,6 +112,7 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
         HookManager.get().checkEnv(IActivityClientProxy.class);
         ActivityInfo info = BRActivity.get(activity).mActivityInfo();
         ContextCompat.fix(activity);
+        IInputMethodManagerProxy.ensureInjected(activity);
         ActivityCompat.fix(activity);
         if (info.theme != 0) {
             activity.getTheme().applyStyle(info.theme, true);
@@ -141,6 +143,7 @@ public final class AppInstrumentation extends BaseInstrumentationDelegate implem
 
     @Override
     public void callActivityOnResume(Activity activity) {
+        IInputMethodManagerProxy.ensureInjected(activity);
         if (CameraCompat.needsHostCameraPackage(activity)) {
             CameraCompat.enterHostCameraPackage(activity);
         }
