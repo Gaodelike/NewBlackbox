@@ -166,10 +166,15 @@ public class ActivityManagerCommonProxy {
                 return;
             }
             ComponentName component = intent.getComponent();
-            String target = component == null ? "" : component.flattenToShortString();
-            if (!target.contains("com.tencent.wework/.login.controller.LoginScannerActivity")) {
+            if (component == null || !"com.tencent.wework".equals(component.getPackageName())) {
                 return;
             }
+            String className = component.getClassName();
+            if (!className.contains("LoginScannerActivity")
+                    && !className.contains("JsWebActivity")) {
+                return;
+            }
+            String target = component.flattenToShortString();
             Bundle extras = intent.getExtras();
             if (extras == null || !extras.containsKey("activity_request_code")) {
                 return;

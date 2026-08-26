@@ -6,8 +6,10 @@ import android.app.Application;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -117,6 +119,8 @@ public class BlackBoxCore extends ClientConfiguration {
     private final int mHostUserId = BRUserHandle.get().myUserId();
 
     private boolean mServicesInitialized = false;
+    private boolean mCoreServiceBound = false;
+    private ServiceConnection mCoreServiceConnection;
     private long mLastServiceInitAttempt = 0;
     private static final long SERVICE_INIT_TIMEOUT_MS = 10000; 
     
@@ -866,6 +870,9 @@ public class BlackBoxCore extends ClientConfiguration {
         } else {
             mProcessType = ProcessType.BAppClient;
         }
+        if (isBlackProcess()) {
+            bindCoreProcessService();
+        }
         if (BlackBoxCore.get().isBlackProcess()) {
             BEnvironment.load();
             if (processName.endsWith("p0")) {
@@ -960,6 +967,48 @@ public class BlackBoxCore extends ClientConfiguration {
         initVpnService();
         
         HookManager.get().init();
+    }
+
+    private synchronized void bindCoreProcessService() {
+        if (mCoreServiceBound || getContext() == null) {
+            return;
+        }
+
+        if (mCoreServiceConnection == null) {
+            mCoreServiceConnection = new ServiceConnection() {
+                @Override
+                public void onServiceConnected(ComponentName name, IBinder service) {
+                    mCoreServiceBound = true;
+                    Slog.d(TAG, "Core process service bound: " + name);
+                }
+
+                @Override
+                public void onServiceDisconnected(ComponentName name) {
+                    mCoreServiceBound = false;
+                    Slog.w(TAG, "Core process service disconnected: " + name);
+                }
+
+                @Override
+                public void onBindingDied(ComponentName name) {
+                    mCoreServiceBound = false;
+                    Slog.w(TAG, "Core process service binding died: " + name);
+                }
+            };
+        }
+
+        try {
+            Intent intent = new Intent(getContext(), DaemonService.class);
+            int flags = Context.BIND_AUTO_CREATE
+                    | Context.BIND_IMPORTANT
+                    | Context.BIND_ABOVE_CLIENT;
+            mCoreServiceBound = getContext().bindService(intent, mCoreServiceConnection, flags);
+            if (!mCoreServiceBound) {
+                Slog.w(TAG, "Unable to bind core process service");
+            }
+        } catch (Throwable e) {
+            mCoreServiceBound = false;
+            Slog.w(TAG, "Failed to bind core process service: " + e.getMessage());
+        }
     }
 
     public void doCreate() {

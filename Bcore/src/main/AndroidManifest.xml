@@ -518,7 +518,11 @@
             android:name="top.niunaijun.blackbox.core.system.DaemonService"
             android:exported="false"
             android:process="@string/black_box_service_name"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the BlackBox virtualization core available to active virtual apps" />
+        </service>
 
         <service
             android:name="top.niunaijun.blackbox.core.system.DaemonService$DaemonInnerService"

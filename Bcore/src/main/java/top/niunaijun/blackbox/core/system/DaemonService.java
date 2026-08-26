@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Binder;
 import android.os.IBinder;
 import android.util.Log;
 
@@ -22,10 +23,11 @@ public class DaemonService extends Service {
     private static final String CHANNEL_ID = "blackbox_daemon_channel";
     private static final String CHANNEL_NAME = "BlackBox Daemon Service";
     private static final String CHANNEL_DESCRIPTION = "Keeps BlackBox core services running";
+    private final IBinder mBinder = new Binder();
 
     @Override
     public IBinder onBind(Intent intent) {
-        return null;
+        return mBinder;
     }
 
     @Override
@@ -36,6 +38,9 @@ public class DaemonService extends Service {
         
         if (BuildCompat.isOreo()) {
             createNotificationChannel();
+            if (!startForegroundService()) {
+                Log.w(TAG, "Unable to promote bound core service to foreground");
+            }
         }
     }
 
@@ -44,11 +49,6 @@ public class DaemonService extends Service {
         Log.d(TAG, "DaemonService onStartCommand");
         
         try {
-            
-            Intent innerIntent = new Intent(this, DaemonInnerService.class);
-            startService(innerIntent);
-            
-            
             if (BuildCompat.isOreo()) {
                 if (!startForegroundService()) {
                     Log.w(TAG, "Failed to start foreground service, falling back to regular service");
@@ -69,6 +69,9 @@ public class DaemonService extends Service {
     @Override
     public void onDestroy() {
         Log.d(TAG, "DaemonService onDestroy");
+        if (BuildCompat.isOreo()) {
+            stopForeground(true);
+        }
         super.onDestroy();
     }
 

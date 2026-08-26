@@ -39,6 +39,15 @@ SpoofedProp spoofed_props[] = {
 
 static int (*orig_system_property_get)(const char *name, char *value) = nullptr;
 
+static bool is_native_bridge_active() {
+    char native_bridge[PROP_VALUE_MAX] = {};
+    int length = __system_property_get("ro.dalvik.vm.native.bridge", native_bridge);
+    if (length <= 0) {
+        return false;
+    }
+    return strcmp(native_bridge, "0") != 0 && strcmp(native_bridge, "null") != 0;
+}
+
 
 int my_system_property_get(const char *name, char *value) {
     for (int i = 0; spoofed_props[i].key != nullptr; ++i) {
@@ -74,6 +83,10 @@ void install_property_get_hook() {
 
 __attribute__((constructor)) void init_virtual_spoof()
 {
+    if (is_native_bridge_active()) {
+        LOGD("Skipping property hook under native bridge translation");
+        return;
+    }
     install_property_get_hook();
     LOGD("VirtualSpoof: __system_property_get hook loaded");
 }

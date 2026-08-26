@@ -8,6 +8,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.IIntentReceiver;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
@@ -789,8 +790,18 @@ public class IActivityManagerProxy extends ClassInvocationStub {
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
             MethodParameterUtils.replaceLastUid(args);
             String permission = (String) args[0];
-            if (permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+            if ((permission.equals(Manifest.permission.INTERNET)
+                    && currentVirtualAppDeclaresInternet())
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
                     || permission.equals(Manifest.permission.SEND_SMS)) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+
+            if (isLocationPermission(permission)
+                    && currentVirtualAppDeclaresPermission(permission)
+                    && hostHoldsPermission(permission)) {
+                Slog.d(TAG, "ActivityManager checkPermission: Granting declared location permission: "
+                        + permission);
                 return PackageManager.PERMISSION_GRANTED;
             }
             
@@ -814,7 +825,21 @@ public class IActivityManagerProxy extends ClassInvocationStub {
     public static class CheckPermissionForDevice extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            MethodParameterUtils.replaceLastUid(args);
+            // Android 16 appends deviceId after uid, so the last integer is no longer the uid.
+            MethodParameterUtils.replaceFirstUid(args);
+            if (containsInternetPermission(args) && currentVirtualAppDeclaresInternet()) {
+                Slog.d(TAG, "ActivityManager " + method.getName()
+                        + ": Granting INTERNET permission");
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            String locationPermission = findLocationPermission(args);
+            if (locationPermission != null
+                    && currentVirtualAppDeclaresPermission(locationPermission)
+                    && hostHoldsPermission(locationPermission)) {
+                Slog.d(TAG, "ActivityManager " + method.getName()
+                        + ": Granting declared location permission: " + locationPermission);
+                return PackageManager.PERMISSION_GRANTED;
+            }
             if (containsCapturePermission(args)) {
                 Slog.d(TAG, "ActivityManager " + method.getName() + ": Granting capture permission");
                 return PackageManager.PERMISSION_GRANTED;
@@ -850,6 +875,74 @@ public class IActivityManagerProxy extends ClassInvocationStub {
             if (arg instanceof String && isAudioPermission((String) arg)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    private static boolean containsInternetPermission(Object[] args) {
+        if (args == null) {
+            return false;
+        }
+        for (Object arg : args) {
+            if (Manifest.permission.INTERNET.equals(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String findLocationPermission(Object[] args) {
+        if (args == null) {
+            return null;
+        }
+        for (Object arg : args) {
+            if (arg instanceof String && isLocationPermission((String) arg)) {
+                return (String) arg;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isLocationPermission(String permission) {
+        return Manifest.permission.ACCESS_FINE_LOCATION.equals(permission)
+                || Manifest.permission.ACCESS_COARSE_LOCATION.equals(permission)
+                || Manifest.permission.ACCESS_BACKGROUND_LOCATION.equals(permission);
+    }
+
+    private static boolean hostHoldsPermission(String permission) {
+        try {
+            return BlackBoxCore.getContext().getPackageManager().checkPermission(
+                    permission, BlackBoxCore.getHostPkg()) == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to verify host permission " + permission + ": "
+                    + e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    private static boolean currentVirtualAppDeclaresInternet() {
+        return currentVirtualAppDeclaresPermission(Manifest.permission.INTERNET);
+    }
+
+    private static boolean currentVirtualAppDeclaresPermission(String permission) {
+        try {
+            String packageName = BActivityThread.getAppPackageName();
+            if (packageName == null) {
+                return false;
+            }
+            PackageInfo packageInfo = BlackBoxCore.getBPackageManager().getPackageInfo(
+                    packageName, PackageManager.GET_PERMISSIONS, BActivityThread.getUserId());
+            if (packageInfo == null || packageInfo.requestedPermissions == null) {
+                return false;
+            }
+            for (String requestedPermission : packageInfo.requestedPermissions) {
+                if (permission.equals(requestedPermission)) {
+                    return true;
+                }
+            }
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to verify virtual permission declaration for " + permission + ": "
+                    + e.getClass().getSimpleName());
         }
         return false;
     }

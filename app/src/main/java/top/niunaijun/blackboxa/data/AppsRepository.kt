@@ -20,6 +20,10 @@ class AppsRepository {
     val TAG: String = "AppsRepository"
     private var mInstalledList = mutableListOf<AppInfo>()
 
+    private companion object {
+        const val WEWORK_PACKAGE = "com.tencent.wework"
+    }
+
     
     private fun safeLoadAppLabel(applicationInfo: ApplicationInfo): String {
         return try {
@@ -81,18 +85,42 @@ class AppsRepository {
     fun previewInstallList() {
         try {
             synchronized(mInstalledList) {
-                val installedApplications: List<ApplicationInfo> =
-                        BlackBoxCore.getPackageManager().getInstalledApplications(0)
+                val packageManager = BlackBoxCore.getPackageManager()
+                val installedApplications =
+                        packageManager.getInstalledApplications(0).toMutableList()
                 val installedList = mutableListOf<AppInfo>()
+
+                // Keep WeWork discoverable even if the broad package query omits it.
+                if (installedApplications.none { it.packageName == WEWORK_PACKAGE }) {
+                    try {
+                        installedApplications.add(
+                                packageManager.getApplicationInfo(WEWORK_PACKAGE, 0)
+                        )
+                        Log.d(TAG, "Added WeWork through explicit package lookup")
+                    } catch (e: Exception) {
+                        Log.d(TAG, "WeWork is not installed or visible: ${e.message}")
+                    }
+                }
 
                 for (installedApplication in installedApplications) {
                     try {
                         val file = File(installedApplication.sourceDir)
 
-                        if ((installedApplication.flags and ApplicationInfo.FLAG_SYSTEM) != 0)
+                        val isWeWork = installedApplication.packageName == WEWORK_PACKAGE
+
+                        // Some managed/OEM devices expose WeWork with the system-app flag.
+                        if ((installedApplication.flags and ApplicationInfo.FLAG_SYSTEM) != 0 &&
+                                        !isWeWork
+                        )
                                 continue
 
-                        if (!AbiUtils.isSupport(file)) continue
+                        if (!AbiUtils.isSupport(file)) {
+                            Log.w(
+                                    TAG,
+                                    "Filtering ABI-incompatible app: ${installedApplication.packageName}"
+                            )
+                            continue
+                        }
 
                         
                         if (BlackBoxCore.get().isBlackBoxApp(installedApplication.packageName)) {
@@ -138,6 +166,10 @@ class AppsRepository {
     ) {
         try {
             loadingLiveData.postValue(true)
+
+            // Refresh on every picker opening instead of relying on the startup cache.
+            previewInstallList()
+
             synchronized(mInstalledList) {
                 val blackBoxCore = BlackBoxCore.get()
                 Log.d(TAG, mInstalledList.joinToString(","))
