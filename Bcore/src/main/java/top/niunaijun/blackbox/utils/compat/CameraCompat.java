@@ -2,18 +2,14 @@ package top.niunaijun.blackbox.utils.compat;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.pm.ApplicationInfo;
 import android.os.IBinder;
 
 import java.util.Locale;
 
-import black.android.app.ActivityThreadAppBindDataContext;
 import black.android.app.BRActivity;
-import black.android.app.BRActivityThread;
-import black.android.app.BRActivityThreadAppBindData;
-import black.android.app.BRLoadedApk;
-import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.app.BActivityThread;
+import top.niunaijun.blackbox.core.NativeCore;
+import top.niunaijun.blackbox.fake.service.libcore.OsStub;
 import top.niunaijun.blackbox.utils.Slog;
 
 public class CameraCompat {
@@ -24,8 +20,6 @@ public class CameraCompat {
     private static final String WEWORK_CUSTOM_CAMERA_ACTIVITY =
             "com.tencent.wework.msg.controller.CustomCameraActivity";
 
-    private static ApplicationInfo sOriginalBoundAppInfo;
-    private static ApplicationInfo sOriginalLoadedApkAppInfo;
     private static IBinder sCameraActivityToken;
     private static String sCameraActivityName;
     private static boolean sUsingHostCameraPackage;
@@ -68,33 +62,6 @@ public class CameraCompat {
         }
 
         try {
-            Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();
-            if (boundApplication == null) {
-                Slog.w(TAG, "ActivityThread bound application is null");
-                return;
-            }
-
-            ActivityThreadAppBindDataContext bindData = BRActivityThreadAppBindData.get(boundApplication);
-            ApplicationInfo currentAppInfo = bindData.appInfo();
-            if (currentAppInfo == null) {
-                Slog.w(TAG, "ActivityThread bound ApplicationInfo is null");
-                return;
-            }
-
-            if (!sUsingHostCameraPackage) {
-                sOriginalBoundAppInfo = currentAppInfo;
-                sOriginalLoadedApkAppInfo = getLoadedApkAppInfo(bindData);
-            }
-
-            ApplicationInfo cameraAppInfo = new ApplicationInfo(currentAppInfo);
-            cameraAppInfo.packageName = BlackBoxCore.getHostPkg();
-            cameraAppInfo.uid = BlackBoxCore.getHostUid();
-            if (cameraAppInfo.processName == null || cameraAppInfo.processName.length() == 0) {
-                cameraAppInfo.processName = BlackBoxCore.getHostPkg();
-            }
-
-            bindData._set_appInfo(cameraAppInfo);
-            setLoadedApkAppInfo(bindData, cameraAppInfo);
             fixApplicationContext();
 
             if (token != null) {
@@ -102,13 +69,17 @@ public class CameraCompat {
             }
             sCameraActivityName = className;
             sUsingHostCameraPackage = true;
+            OsStub.setUseHostUidForCamera(true);
+            NativeCore.setUseHostCallingUidForCamera(true);
 
-            Slog.d(TAG, "Using host op package for legacy camera: activity="
-                    + className + ", "
-                    + currentAppInfo.packageName + " -> " + cameraAppInfo.packageName
-                    + ", uid=" + cameraAppInfo.uid);
+            Slog.d(TAG, "Using scoped host UID for legacy camera: activity=" + className);
         } catch (Throwable e) {
-            Slog.w(TAG, "Failed to switch legacy camera op package: " + e.getMessage());
+            sCameraActivityToken = null;
+            sCameraActivityName = null;
+            sUsingHostCameraPackage = false;
+            OsStub.setUseHostUidForCamera(false);
+            NativeCore.setUseHostCallingUidForCamera(false);
+            Slog.w(TAG, "Failed to enable scoped legacy camera identity: " + e.getMessage());
         }
     }
 
@@ -128,32 +99,21 @@ public class CameraCompat {
     }
 
     public static void restoreHostCameraPackage() {
-        if (!sUsingHostCameraPackage || sOriginalBoundAppInfo == null) {
+        if (!sUsingHostCameraPackage) {
             return;
         }
 
         try {
-            Object boundApplication = BRActivityThread.get(BlackBoxCore.mainThread()).mBoundApplication();
-            if (boundApplication == null) {
-                return;
-            }
-
-            ActivityThreadAppBindDataContext bindData = BRActivityThreadAppBindData.get(boundApplication);
-            bindData._set_appInfo(sOriginalBoundAppInfo);
-            if (sOriginalLoadedApkAppInfo != null) {
-                setLoadedApkAppInfo(bindData, sOriginalLoadedApkAppInfo);
-            }
-            Slog.d(TAG, "Restored legacy camera op package: "
-                    + sOriginalBoundAppInfo.packageName
-                    + ", activity=" + sCameraActivityName);
+            Slog.d(TAG, "Restored scoped legacy camera identity: activity="
+                    + sCameraActivityName);
         } catch (Throwable e) {
-            Slog.w(TAG, "Failed to restore legacy camera op package: " + e.getMessage());
+            Slog.w(TAG, "Failed to restore scoped legacy camera identity: " + e.getMessage());
         } finally {
-            sOriginalBoundAppInfo = null;
-            sOriginalLoadedApkAppInfo = null;
             sCameraActivityToken = null;
             sCameraActivityName = null;
             sUsingHostCameraPackage = false;
+            OsStub.setUseHostUidForCamera(false);
+            NativeCore.setUseHostCallingUidForCamera(false);
         }
     }
 
@@ -167,30 +127,6 @@ public class CameraCompat {
 
     private static boolean isSameToken(IBinder left, IBinder right) {
         return left == right || left.equals(right);
-    }
-
-    private static ApplicationInfo getLoadedApkAppInfo(ActivityThreadAppBindDataContext bindData) {
-        try {
-            Object loadedApk = bindData.info();
-            if (loadedApk == null) {
-                return null;
-            }
-            return BRLoadedApk.get(loadedApk).mApplicationInfo();
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static void setLoadedApkAppInfo(ActivityThreadAppBindDataContext bindData,
-                                           ApplicationInfo appInfo) {
-        try {
-            Object loadedApk = bindData.info();
-            if (loadedApk != null) {
-                BRLoadedApk.get(loadedApk)._set_mApplicationInfo(appInfo);
-            }
-        } catch (Throwable e) {
-            Slog.w(TAG, "Failed to set LoadedApk ApplicationInfo: " + e.getMessage());
-        }
     }
 
     private static void fixActivityContext(Activity activity) {
@@ -215,4 +151,5 @@ public class CameraCompat {
         } catch (Throwable ignored) {
         }
     }
+
 }

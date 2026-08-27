@@ -170,8 +170,7 @@ public class ActivityManagerCommonProxy {
                 return;
             }
             String className = component.getClassName();
-            if (!className.contains("LoginScannerActivity")
-                    && !className.contains("JsWebActivity")) {
+            if (!className.contains("JsWebActivity")) {
                 return;
             }
             String target = component.flattenToShortString();

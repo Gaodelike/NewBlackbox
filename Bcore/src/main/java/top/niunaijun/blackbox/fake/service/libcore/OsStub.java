@@ -16,7 +16,12 @@ import top.niunaijun.blackbox.utils.Reflector;
 
 public class OsStub extends ClassInvocationStub {
     public static final String TAG = "OsStub";
+    private static volatile boolean sUseHostUidForCamera;
     private Object mBase;
+
+    public static void setUseHostUidForCamera(boolean useHostUid) {
+        sUseHostUidForCamera = useHostUid;
+    }
 
     public OsStub() {
         mBase = BRLibcore.get().os();
@@ -86,6 +91,10 @@ public class OsStub extends ClassInvocationStub {
     }
 
     private static int getFakeUid(int callUid) {
+        if (sUseHostUidForCamera) {
+            return BlackBoxCore.getHostUid();
+        }
+
         if (callUid > 0 && callUid <= Process.FIRST_APPLICATION_UID)
             return callUid;
 

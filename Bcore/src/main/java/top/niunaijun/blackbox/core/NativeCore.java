@@ -20,6 +20,7 @@ import top.niunaijun.blackbox.utils.Slog;
 
 public class NativeCore {
     public static final String TAG = "NativeCore";
+    private static volatile boolean sUseHostCallingUidForCamera;
 
     static {
 
@@ -38,10 +39,18 @@ public class NativeCore {
     
     public static native boolean disableResourceLoading();
 
+    public static void setUseHostCallingUidForCamera(boolean useHostUid) {
+        sUseHostCallingUidForCamera = useHostUid;
+    }
+
 
     @Keep
     public static int getCallingUid(int origCallingUid) {
         try {
+            if (sUseHostCallingUidForCamera && origCallingUid == BlackBoxCore.getHostUid()) {
+                return origCallingUid;
+            }
+
             
             if (origCallingUid > 0 && origCallingUid < Process.FIRST_APPLICATION_UID)
                 return origCallingUid;
