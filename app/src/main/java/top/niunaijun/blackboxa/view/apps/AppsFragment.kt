@@ -45,6 +45,13 @@ class AppsFragment : Fragment() {
 
     private var popupMenu: PopupMenu? = null
 
+    private var serviceCallbackRegistered = false
+    private val serviceAvailableCallback = Runnable {
+        if (isAdded && this::viewModel.isInitialized) {
+            viewModel.getInstalledApps(userID)
+        }
+    }
+
     companion object {
         private const val TAG = "AppsFragment"
         
@@ -177,19 +184,14 @@ class AppsFragment : Fragment() {
     override fun onStart() {
         try {
             super.onStart()
-            
-            
-            try {
-                BlackBoxCore.get().addServiceAvailableCallback {
-                    Log.d(TAG, "Services became available, refreshing app list")
-                    
-                    viewModel.getInstalledAppsWithRetry(userID)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error registering service available callback: ${e.message}")
+
+            val blackBoxCore = BlackBoxCore.get()
+            if (blackBoxCore.isServicesAvailable) {
+                serviceAvailableCallback.run()
+            } else if (!serviceCallbackRegistered) {
+                serviceCallbackRegistered = true
+                blackBoxCore.addServiceAvailableCallback(serviceAvailableCallback)
             }
-            
-            viewModel.getInstalledAppsWithRetry(userID)
         } catch (e: Exception) {
             Log.e(TAG, "Error in onStart: ${e.message}")
         }
@@ -380,7 +382,6 @@ class AppsFragment : Fragment() {
     private fun initData() {
         try {
             viewBinding.stateView.showLoading()
-            viewModel.getInstalledApps(userID)
             viewModel.appsLiveData.observe(viewLifecycleOwner) {
                 try {
                     if (it != null) {
@@ -444,6 +445,18 @@ class AppsFragment : Fragment() {
         } catch (e: Exception) {
             Log.e(TAG, "Error in onStop: ${e.message}")
         }
+    }
+
+    override fun onDestroy() {
+        if (serviceCallbackRegistered) {
+            try {
+                BlackBoxCore.get().removeServiceAvailableCallback(serviceAvailableCallback)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error removing service callback: ${e.message}")
+            }
+            serviceCallbackRegistered = false
+        }
+        super.onDestroy()
     }
 
     private fun unInstallApk(info: AppInfo) {

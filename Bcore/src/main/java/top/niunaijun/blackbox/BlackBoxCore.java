@@ -118,7 +118,9 @@ public class BlackBoxCore extends ClientConfiguration {
     private final int mHostUid = Process.myUid();
     private final int mHostUserId = BRUserHandle.get().myUserId();
 
-    private boolean mServicesInitialized = false;
+    private volatile boolean mServicesInitialized = false;
+    private volatile boolean mMainInitializationStarted = false;
+    private final Object mMainInitializationLock = new Object();
     private boolean mCoreServiceBound = false;
     private ServiceConnection mCoreServiceConnection;
     private long mLastServiceInitAttempt = 0;
@@ -864,7 +866,9 @@ public class BlackBoxCore extends ClientConfiguration {
         String processName = getProcessName(getContext());
         if (processName.equals(BlackBoxCore.getHostPkg())) {
             mProcessType = ProcessType.Main;
-            startLogcat();
+            if (clientConfiguration.isEnableLogcatCapture()) {
+                startLogcat();
+            }
         } else if (processName.endsWith(getContext().getString(R.string.black_box_service_name))) {
             mProcessType = ProcessType.Server;
         } else {
@@ -1014,21 +1018,42 @@ public class BlackBoxCore extends ClientConfiguration {
     public void doCreate() {
         
         installSystemHooks();
+
+        if (isMainProcess()) {
+            startMainProcessInitialization();
+            return;
+        }
+
+        initializeCoreServices();
+    }
+
+    private void startMainProcessInitialization() {
+        synchronized (mMainInitializationLock) {
+            if (mMainInitializationStarted) {
+                return;
+            }
+            mMainInitializationStarted = true;
+        }
+
+        Thread initializationThread = new Thread(
+                this::initializeCoreServices,
+                "BlackBoxCoreInit"
+        );
+        initializationThread.start();
+    }
+
+    private void initializeCoreServices() {
         
         
         long startTime = System.currentTimeMillis();
         long maxInitTime = 10000; 
         
         try {
-            
-            ensureBlackProcessInitialized();
-            
-            
+            ensureProperInitialization();
+
             if (System.currentTimeMillis() - startTime > maxInitTime) {
                 Slog.w(TAG, "Initialization timeout exceeded, proceeding with fallback services");
             }
-            
-            ensureProperInitialization();
             
             
             if (isBlackProcess()) {

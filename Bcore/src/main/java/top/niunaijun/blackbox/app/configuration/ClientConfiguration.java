@@ -21,6 +21,13 @@ public abstract class ClientConfiguration {
         return true;
     }
 
+    /**
+     * Continuous logcat capture is expensive and should only be enabled for diagnostics.
+     */
+    public boolean isEnableLogcatCapture() {
+        return false;
+    }
+
     
     public boolean isUseVpnNetwork() {
         return false;

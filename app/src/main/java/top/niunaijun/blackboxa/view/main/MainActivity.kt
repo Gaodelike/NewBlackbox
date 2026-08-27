@@ -35,6 +35,14 @@ class MainActivity : LoadingActivity() {
     private val fragmentList = mutableListOf<AppsFragment>()
 
     private var currentUser = 0
+    private var coreServicesCallbackRegistered = false
+    private val coreServicesAvailableCallback = Runnable {
+        runOnUiThread {
+            if (!isFinishing && !isDestroyed && !this::mViewPagerAdapter.isInitialized) {
+                initViewPager()
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "MainActivity"
@@ -60,9 +68,9 @@ class MainActivity : LoadingActivity() {
 
             setContentView(viewBinding.root)
             initToolbar(viewBinding.toolbarLayout.toolbar, R.string.app_name)
-            initViewPager()
             initFab()
             initToolbarSubTitle()
+            initViewPagerWhenServicesReady()
 
             
             checkStoragePermission()
@@ -331,6 +339,9 @@ class MainActivity : LoadingActivity() {
 
     private fun initViewPager() {
         try {
+            if (this::mViewPagerAdapter.isInitialized) {
+                return
+            }
             val userList = BlackBoxCore.get().users
             userList.forEach { fragmentList.add(AppsFragment.newInstance(it.id)) }
 
@@ -341,6 +352,8 @@ class MainActivity : LoadingActivity() {
             mViewPagerAdapter.replaceData(fragmentList)
             viewBinding.viewPager.adapter = mViewPagerAdapter
             viewBinding.dotsIndicator.setViewPager2(viewBinding.viewPager)
+            viewBinding.fab.isEnabled = true
+            viewBinding.stateView.showContent()
             viewBinding.viewPager.registerOnPageChangeCallback(
                     object : ViewPager2.OnPageChangeCallback() {
                         override fun onPageSelected(position: Int) {
@@ -357,6 +370,19 @@ class MainActivity : LoadingActivity() {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error in initViewPager: ${e.message}")
+        }
+    }
+
+    private fun initViewPagerWhenServicesReady() {
+        viewBinding.fab.isEnabled = false
+        viewBinding.stateView.showLoading()
+
+        val blackBoxCore = BlackBoxCore.get()
+        if (blackBoxCore.isServicesAvailable) {
+            coreServicesAvailableCallback.run()
+        } else if (!coreServicesCallbackRegistered) {
+            coreServicesCallbackRegistered = true
+            blackBoxCore.addServiceAvailableCallback(coreServicesAvailableCallback)
         }
     }
 
@@ -393,6 +419,9 @@ class MainActivity : LoadingActivity() {
 
     fun scanUser() {
         try {
+            if (!this::mViewPagerAdapter.isInitialized) {
+                return
+            }
             val userList = BlackBoxCore.get().users
 
             if (fragmentList.size == userList.size) {
@@ -405,6 +434,18 @@ class MainActivity : LoadingActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error in scanUser: ${e.message}")
         }
+    }
+
+    override fun onDestroy() {
+        if (coreServicesCallbackRegistered) {
+            try {
+                BlackBoxCore.get().removeServiceAvailableCallback(coreServicesAvailableCallback)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error removing core service callback: ${e.message}")
+            }
+            coreServicesCallbackRegistered = false
+        }
+        super.onDestroy()
     }
 
     private fun updateUserRemark(userId: Int) {

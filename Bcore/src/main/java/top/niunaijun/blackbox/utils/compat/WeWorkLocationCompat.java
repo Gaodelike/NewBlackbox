@@ -46,7 +46,9 @@ public final class WeWorkLocationCompat {
     }
 
     private static boolean isEnabled() {
-        return WEWORK_PACKAGE.equals(BActivityThread.getAppPackageName())
+        String packageName = BActivityThread.getAppPackageName();
+        return WEWORK_PACKAGE.equals(packageName)
+                && packageName.equals(BActivityThread.getAppProcessName())
                 && BLocationManager.isFakeLocationEnable();
     }
 

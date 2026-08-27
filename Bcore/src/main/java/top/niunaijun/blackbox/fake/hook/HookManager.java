@@ -93,7 +93,6 @@ import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
 import top.niunaijun.blackbox.fake.service.ISettingsProviderProxy;
 import top.niunaijun.blackbox.fake.service.FeatureFlagUtilsProxy;
-import top.niunaijun.blackbox.fake.service.WorkManagerProxy;
 
 
 
@@ -131,7 +130,6 @@ public class HookManager {
             addInjector(new ContentResolverProxy());
             addInjector(new SystemLibraryProxy());
             addInjector(new ReLinkerProxy());
-            addInjector(new WorkManagerProxy());
             addInjector(new MediaRecorderProxy());
             addInjector(new AudioRecordProxy());
             addInjector(new IMiuiSecurityManagerProxy());
