@@ -11,6 +11,7 @@ android {
     aidlPackagedList "android/accounts/IAccountManagerResponse.aidl"
     buildFeatures {
         aidl true
+        buildConfig true
     }
     buildFeatures {
         prefab true
@@ -29,6 +30,10 @@ android {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        benchmark {
+            initWith release
+            minifyEnabled false
         }
     }
 

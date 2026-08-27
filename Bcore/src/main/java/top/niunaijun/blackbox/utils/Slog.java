@@ -4,6 +4,8 @@ package top.niunaijun.blackbox.utils;
 
 import android.util.Log;
 
+import top.niunaijun.blackbox.BuildConfig;
+
 
 public final class Slog {
      public static final int LOG_ID_SYSTEM = 3;
@@ -12,31 +14,49 @@ public final class Slog {
     }
 
     public static int v(String tag, String msg) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.VERBOSE, tag, msg);
     }
 
     public static int v(String tag, String msg, Throwable tr) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.VERBOSE, tag,
                 msg + '\n' + Log.getStackTraceString(tr));
     }
 
     
     public static int d(String tag, String msg) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.DEBUG, tag, msg);
     }
 
     
     public static int d(String tag, String msg, Throwable tr) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.DEBUG, tag,
                 msg + '\n' + Log.getStackTraceString(tr));
     }
 
     
     public static int i(String tag, String msg) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.INFO, tag, msg);
     }
 
     public static int i(String tag, String msg, Throwable tr) {
+        if (!BuildConfig.DEBUG) {
+            return 0;
+        }
         return Log.println(Log.INFO, tag,
                 msg + '\n' + Log.getStackTraceString(tr));
     }
