@@ -137,7 +137,16 @@ public class ActivityStack {
                 break;
         }
 
-        
+        if (taskRecord != null && !isTaskProcessAlive(taskRecord)) {
+            Slog.w(TAG, "Dropping stale task before launch: " + taskRecord.id);
+            if (sourceTask == taskRecord) {
+                sourceTask = null;
+                resultTo = null;
+            }
+            removeStaleTask(taskRecord);
+            taskRecord = null;
+        }
+
         if (taskRecord == null || taskRecord.needNewTask()) {
             return startActivityInNewTaskLocked(userId, intent, activityInfo, resultTo, launchModeFlags);
         }
@@ -256,6 +265,42 @@ public class ActivityStack {
         }
         return startActivityInSourceTask(intent,
                 resolvedType, resultTo, resultWho, requestCode, flags, options, userId, topActivityRecord, activityInfo, launchModeFlags);
+    }
+
+    private boolean isTaskProcessAlive(TaskRecord taskRecord) {
+        ActivityRecord topActivity = taskRecord.getTopActivityRecord();
+        return topActivity != null
+                && BProcessManagerService.get().isProcessAlive(topActivity.processRecord);
+    }
+
+    private void removeStaleTask(TaskRecord taskRecord) {
+        removeTaskRecord(taskRecord);
+        finishSystemTask(taskRecord.id);
+    }
+
+    private void removeTaskRecord(TaskRecord taskRecord) {
+        synchronized (taskRecord.activities) {
+            for (ActivityRecord activity : taskRecord.activities) {
+                activity.finished = true;
+            }
+        }
+        synchronized (mTasks) {
+            mTasks.remove(taskRecord.id);
+        }
+    }
+
+    private void finishSystemTask(int taskId) {
+        try {
+            for (ActivityManager.AppTask appTask : mAms.getAppTasks()) {
+                ActivityManager.RecentTaskInfo taskInfo = appTask.getTaskInfo();
+                if (taskInfo != null && taskInfo.id == taskId) {
+                    appTask.finishAndRemoveTask();
+                    break;
+                }
+            }
+        } catch (Throwable e) {
+            Slog.w(TAG, "Unable to remove stale system task: " + e.getMessage());
+        }
     }
 
     private void deliverNewIntentLocked(ActivityRecord activityRecord, Intent intent) {
@@ -412,13 +457,22 @@ public class ActivityStack {
             for (TaskRecord next : mTasks.values()) {
                 if (userId == next.userId) {
                     for (ActivityRecord activity : next.activities) {
-                        if (activity.token == token) {
+                        if (token.equals(activity.token)) {
                             record = activity;
                             break;
                         }
                     }
                 }
             }
+        }
+        return record;
+    }
+
+    public ActivityRecord takeActivityRecordForRecovery(int userId, IBinder token) {
+        ActivityRecord record = findActivityRecordByToken(userId, token);
+        if (record != null && record.task != null) {
+            Slog.w(TAG, "Removing orphaned task for fresh recovery: " + record.task.id);
+            removeTaskRecord(record.task);
         }
         return record;
     }

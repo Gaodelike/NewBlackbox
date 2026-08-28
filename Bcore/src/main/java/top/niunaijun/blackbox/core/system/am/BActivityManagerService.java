@@ -12,6 +12,7 @@ import android.os.IBinder;
 import android.os.RemoteException;
 
 import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -328,8 +329,36 @@ public class BActivityManagerService extends IBActivityManagerService.Stub imple
     }
 
     @Override
-    public void restartProcess(String packageName, String processName, int userId) throws RemoteException {
-        BProcessManagerService.get().restartAppProcess(packageName, processName, userId);
+    public AppConfig restartProcess(String packageName, String processName, int userId, IBinder client) throws RemoteException {
+        ProcessRecord processRecord = BProcessManagerService.get()
+                .restartAppProcess(packageName, processName, userId, client, Binder.getCallingPid());
+        return processRecord == null ? null : processRecord.getClientConfig();
+    }
+
+    @Override
+    public Bundle getActivityRecoveryInfo(IBinder token) throws RemoteException {
+        if (token == null) {
+            return null;
+        }
+
+        List<Map.Entry<Integer, UserSpace>> userSpaces;
+        synchronized (mUserSpace) {
+            userSpaces = new ArrayList<>(mUserSpace.entrySet());
+        }
+        for (Map.Entry<Integer, UserSpace> entry : userSpaces) {
+            UserSpace userSpace = entry.getValue();
+            synchronized (userSpace.mStack) {
+                ActivityRecord record = userSpace.mStack
+                        .takeActivityRecordForRecovery(entry.getKey(), token);
+                if (record != null) {
+                    Bundle result = new Bundle();
+                    result.putParcelable("activity_recovery_intent", new Intent(record.intent));
+                    result.putInt("activity_recovery_user_id", record.userId);
+                    return result;
+                }
+            }
+        }
+        return null;
     }
 
     @Override

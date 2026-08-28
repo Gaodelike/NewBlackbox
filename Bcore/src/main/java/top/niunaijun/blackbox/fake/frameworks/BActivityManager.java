@@ -73,15 +73,28 @@ public class BActivityManager extends BlackManager<IBActivityManagerService> {
         return null;
     }
 
-    public void restartProcess(String packageName, String processName, int userId) {
+    public AppConfig restartProcess(String packageName, String processName, int userId, IBinder client) {
         try {
             IBActivityManagerService service = getService();
             if (service != null) {
-                service.restartProcess(packageName, processName, userId);
+                return service.restartProcess(packageName, processName, userId, client);
             }
         } catch (RemoteException e) {
-            e.printStackTrace();
+            Slog.e(TAG, "RemoteException in restartProcess", e);
         }
+        return null;
+    }
+
+    public Bundle getActivityRecoveryInfo(IBinder token) {
+        try {
+            IBActivityManagerService service = getService();
+            if (service != null) {
+                return service.getActivityRecoveryInfo(token);
+            }
+        } catch (RemoteException e) {
+            Slog.e(TAG, "RemoteException in getActivityRecoveryInfo", e);
+        }
+        return null;
     }
 
     public void startActivity(Intent intent, int userId) {

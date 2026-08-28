@@ -15,10 +15,10 @@ import top.niunaijun.blackbox.proxy.ProxyManifest;
 public class ProcessRecord extends Binder {
     public final ApplicationInfo info;
     final public String processName;
-    public IBActivityThread bActivityThread;
-    public IInterface appThread;
+    public volatile IBActivityThread bActivityThread;
+    public volatile IInterface appThread;
     public int uid;
-    public int pid;
+    public volatile int pid;
     public int buid;
     public int bpid;
     public int callingBUid;
