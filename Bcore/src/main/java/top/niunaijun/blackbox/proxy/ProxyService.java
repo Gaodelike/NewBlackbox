@@ -30,9 +30,15 @@ public class ProxyService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        int result = AppServiceDispatcher.get().onStartCommand(intent, flags, startId);
+        if (intent == null) {
+            Log.w(TAG, "Ignoring empty service restart intent");
+            return START_NOT_STICKY;
+        }
+        AppServiceDispatcher.get().onStartCommand(intent, flags, startId);
         promotePushProcessIfNeeded();
-        return result;
+        // Only the dedicated push process should be recreated by Android. Redelivering
+        // the proxy intent preserves the virtual service metadata required for recovery.
+        return mPushProcessForeground ? START_REDELIVER_INTENT : START_NOT_STICKY;
     }
 
     @Override

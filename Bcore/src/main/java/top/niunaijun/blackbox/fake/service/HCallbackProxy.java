@@ -84,7 +84,7 @@ public class HCallbackProxy implements IInjectHook, Handler.Callback {
     @Override
     public boolean isBadEnv() {
         Handler.Callback hCallback = getHCallback();
-        return hCallback != null && hCallback != this;
+        return hCallback != this;
     }
 
     @Override
