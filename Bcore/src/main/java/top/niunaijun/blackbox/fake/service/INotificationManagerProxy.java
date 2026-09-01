@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationChannelGroup;
 import android.content.Context;
 import android.os.Build;
+import android.os.Process;
 
 import androidx.annotation.RequiresApi;
 
@@ -18,7 +19,9 @@ import top.niunaijun.blackbox.fake.frameworks.BNotificationManager;
 import top.niunaijun.blackbox.fake.hook.BinderInvocationStub;
 import top.niunaijun.blackbox.fake.hook.MethodHook;
 import top.niunaijun.blackbox.fake.hook.ProxyMethod;
+import top.niunaijun.blackbox.fake.hook.ProxyMethods;
 import top.niunaijun.blackbox.utils.MethodParameterUtils;
+import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
 import top.niunaijun.blackbox.utils.compat.ParceledListSliceCompat;
 
@@ -53,12 +56,47 @@ public class INotificationManagerProxy extends BinderInvocationStub {
         return false;
     }
 
+    @ProxyMethods({"areNotificationsEnabled", "areNotificationsEnabledForPackage"})
+    public static class AreNotificationsEnabled extends MethodHook {
+
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            MethodParameterUtils.replaceAllAppPkg(args);
+            if ("areNotificationsEnabledForPackage".equals(method.getName())) {
+                Class<?>[] parameterTypes = method.getParameterTypes();
+                for (int i = 0; i < parameterTypes.length; i++) {
+                    if (parameterTypes[i] == int.class && args[i] instanceof Integer) {
+                        args[i] = Process.myUid();
+                    }
+                }
+            }
+            Object enabled = method.invoke(who, args);
+            Slog.w(TAG, method.getName() + " -> " + enabled);
+            return enabled;
+        }
+    }
+
+    @ProxyMethod("getPackageImportance")
+    public static class GetPackageImportance extends MethodHook {
+
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            MethodParameterUtils.replaceAllAppPkg(args);
+            Object importance = method.invoke(who, args);
+            Slog.w(TAG, "getPackageImportance -> " + importance);
+            return importance;
+        }
+    }
+
     @ProxyMethod("getNotificationChannel")
     public static class GetNotificationChannel extends MethodHook {
 
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
-            NotificationChannel notificationChannel = BNotificationManager.get().getNotificationChannel((String) args[args.length - 1]);
+            String channelId = (String) args[args.length - 1];
+            NotificationChannel notificationChannel = BNotificationManager.get().getNotificationChannel(channelId);
+            Slog.w(TAG, "getNotificationChannel(" + channelId + ") -> "
+                    + (notificationChannel == null ? "null" : notificationChannel.getImportance()));
             return notificationChannel;
         }
     }
@@ -105,6 +143,8 @@ public class INotificationManagerProxy extends BinderInvocationStub {
             String tag = (String) args[getTagIndex()];
             int id = (int) args[getIdIndex()];
             Notification notification = MethodParameterUtils.getFirstParam(args, Notification.class);
+            Slog.w(TAG, "enqueueNotificationWithTag: id=" + id + ", tag=" + tag
+                    + ", channel=" + (BuildCompat.isOreo() ? notification.getChannelId() : "legacy"));
             BNotificationManager.get().enqueueNotificationWithTag(id, tag, notification);
             return 0;
         }
@@ -128,7 +168,10 @@ public class INotificationManagerProxy extends BinderInvocationStub {
             if (list == null)
                 return 0;
             for (Object o : list) {
-                BNotificationManager.get().createNotificationChannel((NotificationChannel) o);
+                NotificationChannel channel = (NotificationChannel) o;
+                Slog.w(TAG, "createNotificationChannel: " + channel.getId()
+                        + ", importance=" + channel.getImportance());
+                BNotificationManager.get().createNotificationChannel(channel);
             }
             return 0;
         }

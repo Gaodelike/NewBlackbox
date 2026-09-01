@@ -55,6 +55,8 @@ public class ActivityManagerCompat {
 	
 	public static final int INTENT_SENDER_SERVICE = 4;
 
+	public static final int INTENT_SENDER_FOREGROUND_SERVICE = 5;
+
 	
 	public static final int USER_OP_SUCCESS = 0;
 

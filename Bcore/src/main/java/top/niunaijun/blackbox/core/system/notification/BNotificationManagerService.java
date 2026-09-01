@@ -26,10 +26,12 @@ import top.niunaijun.blackbox.BlackBoxCore;
 import top.niunaijun.blackbox.core.system.BProcessManagerService;
 import top.niunaijun.blackbox.core.system.ISystemService;
 import top.niunaijun.blackbox.core.system.ProcessRecord;
+import top.niunaijun.blackbox.utils.Slog;
 import top.niunaijun.blackbox.utils.compat.BuildCompat;
 
 
 public class BNotificationManagerService extends IBNotificationManagerService.Stub implements ISystemService {
+    private static final String TAG = "BNotificationManagerService";
     private final static BNotificationManagerService sService = new BNotificationManagerService();
     public static final String CHANNEL_BLACK = "@black-";
     public static final String GROUP_BLACK = "@black-group-";
@@ -76,15 +78,21 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         ProcessRecord processByPid = BProcessManagerService.get().findProcessByPid(callingPid);
         if (processByPid == null)
             return null;
-        NotificationRecord notificationRecord = getNotificationRecord(processByPid.getPackageName(), userId);
+        String packageName = processByPid.getPackageName();
+        NotificationRecord notificationRecord = getNotificationRecord(packageName, userId);
         synchronized (notificationRecord.mNotificationChannels) {
-            return notificationRecord.mNotificationChannels.get(channelId);
+            NotificationChannel notificationChannel = notificationRecord.mNotificationChannels.get(channelId);
+            if (notificationChannel != null) {
+                return notificationChannel;
+            }
         }
+        return recoverNotificationChannel(channelId, userId, packageName, notificationRecord);
     }
 
     @Override
     public List<NotificationChannel> getNotificationChannels(String packageName, int userId) throws RemoteException {
         NotificationRecord notificationRecord = getNotificationRecord(packageName, userId);
+        recoverPackageNotificationChannels(packageName, userId, notificationRecord);
         synchronized (notificationRecord.mNotificationChannels) {
             return new ArrayList<>(notificationRecord.mNotificationChannels.values());
         }
@@ -105,14 +113,19 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         ProcessRecord processByPid = BProcessManagerService.get().findProcessByPid(callingPid);
         if (processByPid == null)
             return;
-        handleNotificationChannel(notificationChannel, userId);
-        mRealNotificationManager.createNotificationChannel(notificationChannel);
-
-        resetNotificationChannel(notificationChannel);
+        String packageName = processByPid.getPackageName();
+        handleNotificationChannel(notificationChannel, userId, packageName);
+        try {
+            mRealNotificationManager.createNotificationChannel(notificationChannel);
+        } finally {
+            resetNotificationChannel(notificationChannel);
+        }
         NotificationRecord notificationRecord = getNotificationRecord(processByPid.getPackageName(), userId);
         synchronized (notificationRecord.mNotificationChannels) {
             notificationRecord.mNotificationChannels.put(notificationChannel.getId(), notificationChannel);
         }
+        Slog.d(TAG, "Created notification channel for " + packageName + ": "
+                + notificationChannel.getId());
     }
 
     @Override
@@ -126,7 +139,8 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         synchronized (notificationRecord.mNotificationChannels) {
             NotificationChannel remove = notificationRecord.mNotificationChannels.remove(channelId);
             if (remove != null) {
-                String blackChannelId = getBlackChannelId(remove.getId(), userId);
+                String blackChannelId = getBlackChannelId(remove.getId(), userId,
+                        processByPid.getPackageName());
                 mRealNotificationManager.deleteNotificationChannel(blackChannelId);
             }
         }
@@ -139,10 +153,13 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         ProcessRecord processByPid = BProcessManagerService.get().findProcessByPid(callingPid);
         if (processByPid == null)
             return;
-        handleNotificationGroup(notificationChannelGroup, userId);
-        mRealNotificationManager.createNotificationChannelGroup(notificationChannelGroup);
-
-        resetNotificationGroup(notificationChannelGroup);
+        String packageName = processByPid.getPackageName();
+        handleNotificationGroup(notificationChannelGroup, userId, packageName);
+        try {
+            mRealNotificationManager.createNotificationChannelGroup(notificationChannelGroup);
+        } finally {
+            resetNotificationGroup(notificationChannelGroup);
+        }
         NotificationRecord notificationRecord = getNotificationRecord(processByPid.getPackageName(), userId);
         synchronized (notificationRecord.mNotificationChannelGroups) {
             notificationRecord.mNotificationChannelGroups.put(notificationChannelGroup.getId(), notificationChannelGroup);
@@ -160,7 +177,8 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         synchronized (notificationRecord.mNotificationChannelGroups) {
             NotificationChannelGroup remove = notificationRecord.mNotificationChannelGroups.remove(groupId);
             if (remove != null) {
-                String blackGroupId = getBlackGroupId(remove.getId(), userId);
+                String blackGroupId = getBlackGroupId(remove.getId(), userId,
+                        processByPid.getPackageName());
                 mRealNotificationManager.deleteNotificationChannelGroup(blackGroupId);
             }
         }
@@ -171,18 +189,22 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         ProcessRecord processByPid = BProcessManagerService.get().findProcessByPid(Binder.getCallingPid());
         if (processByPid == null)
             return;
-        int notificationId = getNotificationId(userId, id, processByPid.getPackageName());
+        String packageName = processByPid.getPackageName();
+        int notificationId = getNotificationId(userId, id, packageName, tag);
 
         if (BuildCompat.isOreo()) {
             NotificationOContext notificationOContext = BRNotificationO.get(notification);
             
             if (notificationOContext._check_mChannelId() != null) {
-                String blackChannelId = getBlackChannelId(notificationOContext.mChannelId(), userId);
+                String channelId = notificationOContext.mChannelId();
+                ensureNotificationChannel(channelId, userId, packageName);
+                String blackChannelId = getBlackChannelId(channelId, userId, packageName);
                 notificationOContext._set_mChannelId(blackChannelId);
             }
             
             if (notificationOContext._check_mGroupKey() != null) {
-                String blackGroupId = getBlackGroupId(notificationOContext.mGroupKey(), userId);
+                String blackGroupId = getBlackGroupId(notificationOContext.mGroupKey(), userId,
+                        packageName);
                 notificationOContext._set_mGroupKey(blackGroupId);
             }
         }
@@ -190,7 +212,15 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         synchronized (notificationRecord.mIds) {
             notificationRecord.mIds.add(notificationId);
         }
-        mRealNotificationManager.notify(notificationId, notification);
+        try {
+            mRealNotificationManager.notify(notificationId, notification);
+            Slog.w(TAG, "Posted notification: package=" + packageName
+                    + ", user=" + userId + ", id=" + id + ", tag=" + tag
+                    + ", hostId=" + notificationId);
+        } catch (Throwable e) {
+            Slog.e(TAG, "Unable to post notification for " + packageName
+                    + ": " + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -198,8 +228,11 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         ProcessRecord processByPid = BProcessManagerService.get().findProcessByPid(Binder.getCallingPid());
         if (processByPid == null)
             return;
-        int notificationId = getNotificationId(userId, id, processByPid.getPackageName());
+        String packageName = processByPid.getPackageName();
+        int notificationId = getNotificationId(userId, id, packageName, tag);
         mRealNotificationManager.cancel(notificationId);
+        Slog.d(TAG, "Cancelled notification: package=" + packageName
+                + ", user=" + userId + ", id=" + id + ", tag=" + tag);
 
         NotificationRecord notificationRecord = getNotificationRecord(processByPid.getPackageName(), userId);
         synchronized (notificationRecord.mIds) {
@@ -208,13 +241,15 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
     }
 
     @TargetApi(Build.VERSION_CODES.O)
-    private void handleNotificationChannel(NotificationChannel notificationChannel, int userId) {
+    private void handleNotificationChannel(NotificationChannel notificationChannel, int userId,
+                                           String packageName) {
         NotificationChannelContext channelContext = BRNotificationChannel.get(notificationChannel);
         String channelId = channelContext.mId();
-        String blackChannelId = getBlackChannelId(channelId, userId);
+        String blackChannelId = getBlackChannelId(channelId, userId, packageName);
         channelContext._set_mId(blackChannelId);
 
-        notificationChannel.setGroup(getBlackGroupId(notificationChannel.getGroup(), userId));
+        notificationChannel.setGroup(getBlackGroupId(notificationChannel.getGroup(), userId,
+                packageName));
     }
 
     private void resetNotificationChannel(NotificationChannel notificationChannel) {
@@ -224,16 +259,89 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         channelContext._set_mId(realChannelId);
     }
 
-    private void handleNotificationGroup(NotificationChannelGroup notificationChannelGroup, int userId) {
+    @TargetApi(Build.VERSION_CODES.O)
+    private NotificationChannel recoverNotificationChannel(String channelId, int userId,
+                                                           String packageName,
+                                                           NotificationRecord notificationRecord) {
+        NotificationChannel notificationChannel = mRealNotificationManager.getNotificationChannel(
+                getBlackChannelId(channelId, userId, packageName));
+        boolean legacyChannel = false;
+        if (notificationChannel == null) {
+            notificationChannel = mRealNotificationManager.getNotificationChannel(
+                    getLegacyBlackChannelId(channelId, userId));
+            legacyChannel = notificationChannel != null;
+        }
+        if (notificationChannel == null) {
+            Slog.w(TAG, "Notification channel is missing: package=" + packageName
+                    + ", user=" + userId + ", channel=" + channelId);
+            return null;
+        }
+
+        resetNotificationChannel(notificationChannel);
+        if (legacyChannel) {
+            createHostNotificationChannel(notificationChannel, userId, packageName);
+            Slog.i(TAG, "Migrated legacy notification channel: package=" + packageName
+                    + ", user=" + userId + ", channel=" + channelId);
+        }
+        synchronized (notificationRecord.mNotificationChannels) {
+            notificationRecord.mNotificationChannels.put(channelId, notificationChannel);
+        }
+        return notificationChannel;
+    }
+
+    @TargetApi(Build.VERSION_CODES.O)
+    private void recoverPackageNotificationChannels(String packageName, int userId,
+                                                    NotificationRecord notificationRecord) {
+        String suffix = CHANNEL_BLACK + getNotificationNamespace(packageName, userId);
+        for (NotificationChannel notificationChannel
+                : mRealNotificationManager.getNotificationChannels()) {
+            String channelId = notificationChannel.getId();
+            if (channelId == null || !channelId.endsWith(suffix)) {
+                continue;
+            }
+            resetNotificationChannel(notificationChannel);
+            synchronized (notificationRecord.mNotificationChannels) {
+                notificationRecord.mNotificationChannels.put(notificationChannel.getId(),
+                        notificationChannel);
+            }
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.O)
+    private void ensureNotificationChannel(String channelId, int userId, String packageName) {
+        if (channelId == null) {
+            return;
+        }
+        String blackChannelId = getBlackChannelId(channelId, userId, packageName);
+        if (mRealNotificationManager.getNotificationChannel(blackChannelId) != null) {
+            return;
+        }
+        recoverNotificationChannel(channelId, userId, packageName,
+                getNotificationRecord(packageName, userId));
+    }
+
+    @TargetApi(Build.VERSION_CODES.O)
+    private void createHostNotificationChannel(NotificationChannel notificationChannel, int userId,
+                                               String packageName) {
+        handleNotificationChannel(notificationChannel, userId, packageName);
+        try {
+            mRealNotificationManager.createNotificationChannel(notificationChannel);
+        } finally {
+            resetNotificationChannel(notificationChannel);
+        }
+    }
+
+    private void handleNotificationGroup(NotificationChannelGroup notificationChannelGroup, int userId,
+                                         String packageName) {
         NotificationChannelGroupContext groupContext = BRNotificationChannelGroup.get(notificationChannelGroup);
         String groupId = groupContext.mId();
-        String blackGroupId = getBlackGroupId(groupId, userId);
+        String blackGroupId = getBlackGroupId(groupId, userId, packageName);
         groupContext._set_mId(blackGroupId);
 
         List<NotificationChannel> notificationChannels = groupContext.mChannels();
         if (notificationChannels != null) {
             for (NotificationChannel notificationChannel : notificationChannels) {
-                createNotificationChannel(notificationChannel, userId);
+                handleNotificationChannel(notificationChannel, userId, packageName);
             }
         }
     }
@@ -257,12 +365,18 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         NotificationRecord notificationRecord = getNotificationRecord(packageName, userId);
         if (BuildCompat.isOreo()) {
             for (NotificationChannelGroup value : notificationRecord.mNotificationChannelGroups.values()) {
-                String blackGroupId = getBlackGroupId(value.getId(), userId);
+                String blackGroupId = getBlackGroupId(value.getId(), userId, packageName);
                 mRealNotificationManager.deleteNotificationChannelGroup(blackGroupId);
             }
             for (NotificationChannel value : notificationRecord.mNotificationChannels.values()) {
-                String blackChannelId = getBlackChannelId(value.getId(), userId);
+                String blackChannelId = getBlackChannelId(value.getId(), userId, packageName);
                 mRealNotificationManager.deleteNotificationChannel(blackChannelId);
+            }
+            String suffix = CHANNEL_BLACK + getNotificationNamespace(packageName, userId);
+            for (NotificationChannel channel : mRealNotificationManager.getNotificationChannels()) {
+                if (channel.getId() != null && channel.getId().endsWith(suffix)) {
+                    mRealNotificationManager.deleteNotificationChannel(channel.getId());
+                }
             }
         }
         for (Integer id : notificationRecord.mIds) {
@@ -271,7 +385,14 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         removeNotificationRecord(packageName, userId);
     }
 
-    private String getBlackChannelId(String channelId, int userId) {
+    private String getBlackChannelId(String channelId, int userId, String packageName) {
+        if (channelId == null || channelId.contains(CHANNEL_BLACK)) {
+            return channelId;
+        }
+        return channelId + CHANNEL_BLACK + getNotificationNamespace(packageName, userId);
+    }
+
+    private String getLegacyBlackChannelId(String channelId, int userId) {
         if (channelId == null || channelId.contains(CHANNEL_BLACK)) {
             return channelId;
         }
@@ -285,10 +406,10 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
         return channelId.split(CHANNEL_BLACK)[0];
     }
 
-    private String getBlackGroupId(String groupId, int userId) {
+    private String getBlackGroupId(String groupId, int userId, String packageName) {
         if (groupId == null || groupId.contains(GROUP_BLACK))
             return groupId;
-        return groupId + GROUP_BLACK + userId;
+        return groupId + GROUP_BLACK + getNotificationNamespace(packageName, userId);
     }
 
     private String getRealGroupId(String groupId) {
@@ -298,6 +419,16 @@ public class BNotificationManagerService extends IBNotificationManagerService.St
     }
 
     public static int getNotificationId(int userId, int notificationId, String packageName) {
-        return (packageName + userId + notificationId).hashCode();
+        return getNotificationId(userId, notificationId, packageName, null);
+    }
+
+    public static int getNotificationId(int userId, int notificationId, String packageName,
+                                        String tag) {
+        return (packageName + '|' + userId + '|' + notificationId + '|'
+                + String.valueOf(tag)).hashCode();
+    }
+
+    private String getNotificationNamespace(String packageName, int userId) {
+        return userId + "-" + Integer.toHexString(packageName.hashCode());
     }
 }

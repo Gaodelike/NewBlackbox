@@ -6,6 +6,7 @@ import androidx.preference.PreferenceFragmentCompat
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackboxa.R
 import top.niunaijun.blackboxa.app.AppManager
+import top.niunaijun.blackboxa.util.BackgroundKeepAlive
 import top.niunaijun.blackboxa.util.toast
 import top.niunaijun.blackboxa.view.gms.GmsManagerActivity
 
@@ -15,6 +16,7 @@ class SettingFragment : PreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.setting, rootKey)
 
         initGms()
+        initBackgroundKeepAlive()
 
         invalidHideState {
             val rootHidePreference: Preference = (findPreference("root_hide")!!)
@@ -45,6 +47,31 @@ class SettingFragment : PreferenceFragmentCompat() {
         }
 
         initSendLogs()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateBackgroundKeepAliveSummary()
+    }
+
+    private fun initBackgroundKeepAlive() {
+        findPreference<Preference>("background_keep_alive")?.setOnPreferenceClickListener {
+            BackgroundKeepAlive.requestBatteryOptimizationExemption(requireContext())
+            true
+        }
+        updateBackgroundKeepAliveSummary()
+    }
+
+    private fun updateBackgroundKeepAliveSummary() {
+        val preference = findPreference<Preference>("background_keep_alive") ?: return
+        preference.summary =
+                getString(
+                        if (BackgroundKeepAlive.isBatteryOptimizationDisabled(requireContext())) {
+                            R.string.background_keep_alive_allowed
+                        } else {
+                            R.string.background_keep_alive_required
+                        }
+                )
     }
 
     private fun initGms() {

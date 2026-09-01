@@ -49,6 +49,8 @@ import top.niunaijun.blackbox.fake.hook.ScanClass;
 import top.niunaijun.blackbox.fake.service.base.PkgMethodProxy;
 import top.niunaijun.blackbox.fake.service.context.providers.ContentProviderStub;
 import top.niunaijun.blackbox.proxy.ProxyManifest;
+import top.niunaijun.blackbox.proxy.ProxyBroadcastReceiver;
+import top.niunaijun.blackbox.proxy.ProxyPendingService;
 import top.niunaijun.blackbox.proxy.record.ProxyBroadcastRecord;
 import top.niunaijun.blackbox.proxy.record.ProxyPendingRecord;
 import top.niunaijun.blackbox.utils.MethodParameterUtils;
@@ -508,12 +510,42 @@ public class IActivityManagerProxy extends ClassInvocationStub {
 
             for (int i = 0; i < intents.length; i++) {
                 Intent intent = intents[i];
+                if (intent == null) {
+                    continue;
+                }
                 switch (type) {
+                    case ActivityManagerCompat.INTENT_SENDER_BROADCAST:
+                        Intent broadcastShadow = intent.cloneFilter();
+                        if (intent.getComponent() != null) {
+                            broadcastShadow.setPackage(null);
+                            broadcastShadow.setComponent(new ComponentName(
+                                    BlackBoxCore.getHostPkg(),
+                                    ProxyBroadcastReceiver.class.getName()));
+                        } else {
+                            broadcastShadow.setPackage(BlackBoxCore.getHostPkg());
+                        }
+                        ProxyBroadcastRecord.saveStub(broadcastShadow, intent,
+                                BActivityThread.getUserId());
+                        intents[i] = broadcastShadow;
+                        break;
                     case ActivityManagerCompat.INTENT_SENDER_ACTIVITY:
-                        Intent shadow = new Intent();
+                        Intent shadow = intent.cloneFilter();
+                        shadow.setPackage(null);
                         shadow.setComponent(new ComponentName(BlackBoxCore.getHostPkg(), ProxyManifest.getProxyPendingActivity(BActivityThread.getAppPid())));
                         ProxyPendingRecord.saveStub(shadow, intent, BActivityThread.getUserId());
                         intents[i] = shadow;
+                        break;
+                    case ActivityManagerCompat.INTENT_SENDER_SERVICE:
+                    case ActivityManagerCompat.INTENT_SENDER_FOREGROUND_SERVICE:
+                        Intent serviceShadow = intent.cloneFilter();
+                        serviceShadow.setPackage(null);
+                        serviceShadow.setComponent(new ComponentName(
+                                BlackBoxCore.getHostPkg(),
+                                ProxyPendingService.class.getName()));
+                        ProxyPendingRecord.saveStub(serviceShadow, intent,
+                                BActivityThread.getUserId(),
+                                type == ActivityManagerCompat.INTENT_SENDER_FOREGROUND_SERVICE);
+                        intents[i] = serviceShadow;
                         break;
                 }
             }

@@ -515,6 +515,11 @@
         </receiver>
 
         <service
+            android:name=".proxy.ProxyPendingService"
+            android:exported="false"
+            android:process="@string/black_box_service_name" />
+
+        <service
             android:name="top.niunaijun.blackbox.core.system.DaemonService"
             android:exported="false"
             android:process="@string/black_box_service_name"

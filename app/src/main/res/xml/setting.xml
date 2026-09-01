@@ -21,6 +21,11 @@
                 app:key="daemon_enable"
                 app:title="@string/daemon_enable" />
 
+        <Preference
+                android:key="background_keep_alive"
+                android:title="@string/background_keep_alive"
+                android:summary="@string/background_keep_alive_required" />
+
         <SwitchPreferenceCompat
                 app:key="use_vpn_network"
                 app:title="@string/use_vpn_network"

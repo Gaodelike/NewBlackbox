@@ -57,6 +57,13 @@
     <string name="uninstall_module_toast">Please uninstall the xposed module in the Module Manager</string>
     <string name="other">Others</string>
     <string name="daemon_enable">Daemon</string>
+    <string name="background_keep_alive">后台消息保活</string>
+    <string name="background_keep_alive_allowed">已允许忽略电池优化</string>
+    <string name="background_keep_alive_required">需要允许，否则即时消息可能延迟或无通知</string>
+    <string name="background_keep_alive_title">允许后台消息保活</string>
+    <string name="background_keep_alive_message">为避免系统冻结 BlackBox 内的企业微信、微信等消息进程，请允许 BlackBox 忽略电池优化。后台保活会增加一定耗电。</string>
+    <string name="background_keep_alive_allow">前往允许</string>
+    <string name="background_keep_alive_later">稍后</string>
     <string name="use_vpn_network">Use VPN Network</string>
     <string name="use_vpn_network_summary">Route traffic through VPN for sandboxed apps (may improve network access)</string>
     <string name="disable_flag_secure">Disable Flag Secure</string>

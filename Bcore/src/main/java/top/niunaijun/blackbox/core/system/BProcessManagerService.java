@@ -402,7 +402,6 @@ public class BProcessManagerService implements ISystemService {
         record.initLock.open();
         if (removed) {
             removeProc(record);
-            BNotificationManagerService.get().deletePackageNotification(record.getPackageName(), record.userId);
         }
     }
 

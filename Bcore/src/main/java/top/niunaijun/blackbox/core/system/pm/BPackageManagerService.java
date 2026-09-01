@@ -34,6 +34,7 @@ import top.niunaijun.blackbox.core.env.BEnvironment;
 import top.niunaijun.blackbox.core.system.BProcessManagerService;
 import top.niunaijun.blackbox.core.system.ISystemService;
 import top.niunaijun.blackbox.core.system.ProcessRecord;
+import top.niunaijun.blackbox.core.system.notification.BNotificationManagerService;
 import top.niunaijun.blackbox.core.system.user.BUserHandle;
 import top.niunaijun.blackbox.core.system.user.BUserInfo;
 import top.niunaijun.blackbox.core.system.user.BUserManagerService;
@@ -779,6 +780,7 @@ public class BPackageManagerService extends IBPackageManagerService.Stub impleme
     }
 
     void onPackageUninstalled(String packageName, boolean isRemove, int userId) {
+        BNotificationManagerService.get().deletePackageNotification(packageName, userId);
         for (PackageMonitor packageMonitor : mPackageMonitors) {
             packageMonitor.onPackageUninstalled(packageName, isRemove, userId);
         }

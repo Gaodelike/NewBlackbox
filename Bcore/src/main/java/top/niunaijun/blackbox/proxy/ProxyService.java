@@ -1,35 +1,46 @@
 package top.niunaijun.blackbox.proxy;
 
+import android.app.Notification;
 import android.app.Service;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.IBinder;
+import android.text.TextUtils;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
-import top.niunaijun.blackbox.BlackBoxCore;
+import top.niunaijun.blackbox.app.BActivityThread;
 import top.niunaijun.blackbox.app.dispatcher.AppServiceDispatcher;
-import top.niunaijun.blackbox.utils.compat.BuildCompat;
 
 
 public class ProxyService extends Service {
     public static final String TAG = "StubService";
+    private static final String PUSH_CHANNEL_ID = "blackbox_daemon_channel";
+    private boolean mPushProcessForeground;
 
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        return AppServiceDispatcher.get().onBind(intent);
+        IBinder binder = AppServiceDispatcher.get().onBind(intent);
+        promotePushProcessIfNeeded();
+        return binder;
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        AppServiceDispatcher.get().onStartCommand(intent, flags, startId);
-        return START_NOT_STICKY;
+        int result = AppServiceDispatcher.get().onStartCommand(intent, flags, startId);
+        promotePushProcessIfNeeded();
+        return result;
     }
 
     @Override
     public void onDestroy() {
+        if (mPushProcessForeground) {
+            stopForeground(true);
+            mPushProcessForeground = false;
+        }
         super.onDestroy();
         AppServiceDispatcher.get().onDestroy();
     }
@@ -58,12 +69,48 @@ public class ProxyService extends Service {
         return false;
     }
 
-    private void showNotification() {
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(getApplicationContext(), getPackageName() + ".blackbox_proxy")
-                .setPriority(NotificationCompat.PRIORITY_MAX);
-        if (BuildCompat.isOreo()) {
-            startForeground(BlackBoxCore.getHostPkg().hashCode(), builder.build());
+    private void promotePushProcessIfNeeded() {
+        if (mPushProcessForeground || !isSupportedPushProcess()) {
+            return;
         }
+        try {
+            String virtualPackage = BActivityThread.getAppPackageName();
+            Notification notification = new NotificationCompat.Builder(this, PUSH_CHANNEL_ID)
+                    .setContentTitle("BlackBox 消息服务")
+                    .setContentText(getPushNotificationText(virtualPackage))
+                    .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                    .setOngoing(true)
+                    .setShowWhen(false)
+                    .build();
+            int notificationId = (virtualPackage + '|' + BActivityThread.getUserId()
+                    + "|push").hashCode();
+            startForeground(notificationId, notification);
+            mPushProcessForeground = true;
+            Log.i(TAG, "Promoted virtual push process: "
+                    + BActivityThread.getAppProcessName());
+        } catch (Throwable e) {
+            Log.e(TAG, "Unable to promote virtual push process", e);
+        }
+    }
+
+    private boolean isSupportedPushProcess() {
+        String packageName = BActivityThread.getAppPackageName();
+        String processName = BActivityThread.getAppProcessName();
+        if (TextUtils.isEmpty(packageName) || TextUtils.isEmpty(processName)
+                || !processName.endsWith(":push")) {
+            return false;
+        }
+        return "com.tencent.wework".equals(packageName)
+                || "com.tencent.mm".equals(packageName);
+    }
+
+    private String getPushNotificationText(String packageName) {
+        if ("com.tencent.wework".equals(packageName)) {
+            return "正在保持企业微信后台连接";
+        }
+        return "正在保持微信后台连接";
     }
 
     public static class P0 extends ProxyService {

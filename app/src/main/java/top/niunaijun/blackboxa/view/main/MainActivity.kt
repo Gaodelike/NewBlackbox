@@ -19,6 +19,7 @@ import top.niunaijun.blackboxa.app.App
 import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.databinding.ActivityMainBinding
 import top.niunaijun.blackboxa.util.Resolution
+import top.niunaijun.blackboxa.util.BackgroundKeepAlive
 import top.niunaijun.blackboxa.util.inflate
 import top.niunaijun.blackboxa.view.apps.AppsFragment
 import top.niunaijun.blackboxa.view.base.LoadingActivity
@@ -79,6 +80,8 @@ class MainActivity : LoadingActivity() {
 
             
             checkVpnPermission()
+
+            checkBackgroundKeepAlivePermission()
 
             try {
                 BlackBoxCore.get().onAfterMainActivityOnCreate(this)
@@ -370,6 +373,27 @@ class MainActivity : LoadingActivity() {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error in initViewPager: ${e.message}")
+        }
+    }
+
+    private fun checkBackgroundKeepAlivePermission() {
+        if (BackgroundKeepAlive.isBatteryOptimizationDisabled(this)) {
+            return
+        }
+
+        val preferences = getSharedPreferences("background_keep_alive", Context.MODE_PRIVATE)
+        if (preferences.getBoolean("prompted", false)) {
+            return
+        }
+        preferences.edit().putBoolean("prompted", true).apply()
+
+        MaterialDialog(this).show {
+            title(R.string.background_keep_alive_title)
+            message(R.string.background_keep_alive_message)
+            positiveButton(R.string.background_keep_alive_allow) {
+                BackgroundKeepAlive.requestBatteryOptimizationExemption(this@MainActivity)
+            }
+            negativeButton(R.string.background_keep_alive_later)
         }
     }
 
