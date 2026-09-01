@@ -66,17 +66,33 @@ public class LauncherActivity extends Activity {
 
             Slog.d(TAG, "LauncherActivity.onCreate() for package: " + packageName + ", userId: " + userId);
 
+            setContentView(R.layout.activity_launcher);
+            ImageView iconView = findViewById(R.id.iv_icon);
+            TextView nameView = findViewById(R.id.tv_app_name);
+
+            // Start the guest before loading optional splash metadata. Package icon and
+            // label lookups may require disk and binder work on a cold host process.
+            launchAppAsync(launchIntent, userId);
+            loadAppPresentationAsync(packageName, userId, iconView, nameView);
             
+        } catch (Exception e) {
+            Slog.e(TAG, "Critical error in LauncherActivity.onCreate()", e);
+            finish();
+        }
+    }
+
+    private void loadAppPresentationAsync(final String packageName, final int userId,
+                                          final ImageView iconView, final TextView nameView) {
+        new Thread(() -> {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+
             PackageInfo packageInfo = getPackageInfoWithFallback(packageName, userId);
-            
             if (packageInfo == null) {
                 Slog.w(TAG, "Package info not available for " + packageName + ", but proceeding with launch");
-                
             } else {
                 Slog.d(TAG, "Successfully retrieved package info for " + packageName);
             }
-            
-            
+
             Drawable drawable = null;
             String appName = packageName;
             try {
@@ -84,50 +100,50 @@ public class LauncherActivity extends Activity {
                     PackageManager pm = getPackageManager();
                     drawable = pm.getApplicationIcon(packageInfo.applicationInfo);
                     CharSequence label = pm.getApplicationLabel(packageInfo.applicationInfo);
-                    if (label != null) appName = label.toString();
+                    if (label != null) {
+                        appName = label.toString();
+                    }
                 }
             } catch (Exception e) {
                 Slog.w(TAG, "Failed to load app icon or name for " + packageName + ": " + e.getMessage());
             }
-            setContentView(R.layout.activity_launcher);
-            ImageView iconView = findViewById(R.id.iv_icon);
-            TextView nameView = findViewById(R.id.tv_app_name);
-            if (nameView != null) {
-                nameView.setText(appName);
-                nameView.setAlpha(0f);
-                nameView.animate()
-                    .alpha(1f)
-                    .setDuration(500)
-                    .setStartDelay(200)
-                    .start();
-            }
-            if (iconView != null && drawable != null) {
-                iconView.setImageDrawable(drawable);
-                iconView.setScaleX(0.7f);
-                iconView.setScaleY(0.7f);
-                iconView.setAlpha(0f);
-                iconView.animate()
-                    .scaleX(1.1f)
-                    .scaleY(1.1f)
-                    .alpha(1f)
-                    .setDuration(350)
-                    .setInterpolator(new OvershootInterpolator())
-                    .withEndAction(() -> iconView.animate()
-                        .scaleX(1f)
-                        .scaleY(1f)
-                        .setDuration(150)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator())
-                        .start())
-                    .start();
-            }
-            
-            
-            launchAppAsync(launchIntent, userId);
-            
-        } catch (Exception e) {
-            Slog.e(TAG, "Critical error in LauncherActivity.onCreate()", e);
-            finish();
-        }
+
+            final Drawable appIcon = drawable;
+            final String appLabel = appName;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                if (nameView != null) {
+                    nameView.setText(appLabel);
+                    nameView.setAlpha(0f);
+                    nameView.animate()
+                        .alpha(1f)
+                        .setDuration(500)
+                        .setStartDelay(200)
+                        .start();
+                }
+                if (iconView != null && appIcon != null) {
+                    iconView.setImageDrawable(appIcon);
+                    iconView.setScaleX(0.7f);
+                    iconView.setScaleY(0.7f);
+                    iconView.setAlpha(0f);
+                    iconView.animate()
+                        .scaleX(1.1f)
+                        .scaleY(1.1f)
+                        .alpha(1f)
+                        .setDuration(350)
+                        .setInterpolator(new OvershootInterpolator())
+                        .withEndAction(() -> iconView.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(150)
+                            .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                            .start())
+                        .start();
+                }
+            });
+        }, "SplashMetadataThread").start();
     }
 
     
@@ -177,11 +193,7 @@ public class LauncherActivity extends Activity {
         new Thread(() -> {
             try {
                 Slog.d(TAG, "Starting app launch in background thread");
-                
-                
-                Thread.sleep(100);
-                
-                
+
                 BlackBoxCore.getBActivityManager().startActivity(launchIntent, userId);
                 
                 Slog.d(TAG, "App launch initiated successfully");
